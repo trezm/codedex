@@ -3,7 +3,6 @@ import type { Annotation, SemanticNode } from "@syl/core";
 import type { EditorView } from "@codemirror/view";
 import FileBrowser from "./components/FileBrowser";
 import CodeViewer from "./components/CodeViewer";
-import AnnotationPanel from "./components/AnnotationPanel";
 import AnnotationOverlay, {
   AnnotationBracket,
 } from "./components/AnnotationOverlay";
@@ -42,7 +41,6 @@ export default function App() {
     null
   );
   const [refreshKey, setRefreshKey] = useState(0);
-  const [showAllAnnotations, setShowAllAnnotations] = useState(false);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   const { pathResult } = useTreeSitter(selectedFile, fileContent);
@@ -91,16 +89,6 @@ export default function App() {
     resolvedData ? Object.keys(resolvedData.annotations) : []
   );
 
-  const currentAnnotations: Annotation[] =
-    selectedPath && resolvedData?.annotations[selectedPath]
-      ? resolvedData.annotations[selectedPath]
-      : [];
-
-  const selectedNode =
-    selectedPath && pathResult
-      ? pathResult.pathMap.get(selectedPath) ?? null
-      : null;
-
   const annotationBrackets = useMemo(() => {
     if (!pathResult || !resolvedData) return [];
     return buildBrackets(pathResult.roots, resolvedData.annotations, 0);
@@ -119,17 +107,6 @@ export default function App() {
             {selectedFile}
           </span>
         )}
-        <div className="ml-auto">
-          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={showAllAnnotations}
-              onChange={(e) => setShowAllAnnotations(e.target.checked)}
-              className="rounded border-gray-600 bg-gray-800 text-blue-500 h-3.5 w-3.5"
-            />
-            Show all annotations
-          </label>
-        </div>
       </header>
       <div className="flex flex-1 overflow-hidden">
         <div className="w-56 flex-shrink-0">
@@ -156,25 +133,17 @@ export default function App() {
               </div>
             )}
           </div>
-          {showAllAnnotations && annotationBrackets.length > 0 && (
+          {annotationBrackets.length > 0 && selectedFile && (
             <AnnotationOverlay
               editorView={editorView}
               annotations={annotationBrackets}
               totalLines={totalLines}
+              filePath={selectedFile}
               onSelectPath={handleSelectPath}
               selectedPath={selectedPath}
+              onAnnotationsChanged={handleAnnotationsChanged}
             />
           )}
-        </div>
-        <div className="w-72 flex-shrink-0">
-          <AnnotationPanel
-            filePath={selectedFile}
-            selectedPath={selectedPath}
-            selectedNode={selectedNode}
-            annotations={currentAnnotations}
-            orphanedPaths={resolvedData?.orphans ?? []}
-            onAnnotationsChanged={handleAnnotationsChanged}
-          />
         </div>
       </div>
     </div>
