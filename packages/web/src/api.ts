@@ -81,3 +81,41 @@ export async function deleteAnnotation(
     body: JSON.stringify({ file, path: semanticPath }),
   });
 }
+
+export async function checkGenerateStatus(): Promise<{ available: boolean }> {
+  const res = await fetch("/api/generate/status");
+  return res.json();
+}
+
+export async function generateAnnotation(
+  file: string,
+  model: string,
+  semanticPath: string
+): Promise<{ ok: boolean; count: number }> {
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file, model, semanticPath }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "Generation failed");
+  }
+  return res.json();
+}
+
+export async function generateFileAnnotations(
+  file: string,
+  model: string
+): Promise<{ ok: boolean; count: number }> {
+  const res = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file, model }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error || "Generation failed");
+  }
+  return res.json();
+}

@@ -3,35 +3,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {
   AnnotationStore,
-  FileSystem,
   getLanguageForFile,
   createParser,
   buildSemanticPaths,
   resolveAnnotations,
   detectOrphans,
 } from "@syl/core";
-
-function nodeFs(): FileSystem {
-  return {
-    async readFile(p: string) {
-      return fs.readFile(p, "utf-8");
-    },
-    async writeFile(p: string, content: string) {
-      await fs.writeFile(p, content, "utf-8");
-    },
-    async mkdir(p: string) {
-      await fs.mkdir(p, { recursive: true });
-    },
-    async exists(p: string) {
-      try {
-        await fs.access(p);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  };
-}
+import { nodeFs } from "../util/node-fs.js";
 
 export function annotationRoutes(projectRoot: string, wasmDir: string, treeSitterWasmDir: string) {
   const app = new Hono();

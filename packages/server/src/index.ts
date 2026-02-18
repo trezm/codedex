@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { fileRoutes } from "./routes/files.js";
 import { annotationRoutes } from "./routes/annotations.js";
+import { generateRoutes } from "./routes/generate.js";
 
 // Import language registrations
 import "@syl/core";
@@ -28,6 +29,7 @@ app.use("*", cors());
 // API routes
 app.route("/api/files", fileRoutes(projectRoot));
 app.route("/api/annotations", annotationRoutes(projectRoot, grammarWasmDir, treeSitterWasmDir));
+app.route("/api/generate", generateRoutes(projectRoot, grammarWasmDir, treeSitterWasmDir));
 
 // Serve WASM files — check tree-sitter runtime dir first, then grammar dir
 app.get("/wasm/:file", async (c) => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import type { EditorView } from "@codemirror/view";
 import type { Annotation } from "@syl/core";
 import { addAnnotation, updateAnnotation, deleteAnnotation } from "../api";
+import GenerateButton from "./GenerateButton";
 
 export interface AnnotationBracket {
   path: string;
@@ -21,6 +22,7 @@ interface AnnotationOverlayProps {
   onSelectPath: (path: string | null) => void;
   selectedPath: string | null;
   onAnnotationsChanged: () => void;
+  onGenerate?: (semanticPath: string) => Promise<void>;
 }
 
 const COLUMN_WIDTH = 18;
@@ -246,6 +248,7 @@ export default function AnnotationOverlay({
   onSelectPath,
   selectedPath,
   onAnnotationsChanged,
+  onGenerate,
 }: AnnotationOverlayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lineHeight, setLineHeight] = useState(18.4);
@@ -391,15 +394,26 @@ export default function AnnotationOverlay({
                         onClose={() => setAddingPath(null)}
                       />
                     ) : (
-                      <button
-                        className="w-full mt-1 px-2 py-0.5 text-[10px] bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded text-blue-300"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAddingPath(bracket.path);
-                        }}
-                      >
-                        + Add
-                      </button>
+                      <div className="flex gap-1 mt-1">
+                        <button
+                          className="flex-1 px-2 py-0.5 text-[10px] bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 rounded text-blue-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setAddingPath(bracket.path);
+                          }}
+                        >
+                          + Add
+                        </button>
+                        {onGenerate && (
+                          <GenerateButton
+                            label="AI Generate"
+                            onClick={async () => {
+                              await onGenerate(bracket.path);
+                              onAnnotationsChanged();
+                            }}
+                          />
+                        )}
+                      </div>
                     )}
                   </div>
                 </ExpandableContent>

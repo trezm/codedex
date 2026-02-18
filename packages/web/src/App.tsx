@@ -6,8 +6,17 @@ import CodeViewer from "./components/CodeViewer";
 import AnnotationOverlay, {
   AnnotationBracket,
 } from "./components/AnnotationOverlay";
+import ModelSelector, { useSelectedModel } from "./components/ModelSelector";
+import GenerateButton from "./components/GenerateButton";
 import { useTreeSitter } from "./hooks/useTreeSitter";
-import { fetchFileContent, resolveAnnotations, ResolveResponse } from "./api";
+import {
+  fetchFileContent,
+  resolveAnnotations,
+  generateAnnotation,
+  generateFileAnnotations,
+  checkGenerateStatus,
+  ResolveResponse,
+} from "./api";
 
 function buildBrackets(
   nodes: SemanticNode[],
@@ -42,8 +51,15 @@ export default function App() {
   );
   const [refreshKey, setRefreshKey] = useState(0);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
+  const [generateAvailable, setGenerateAvailable] = useState(false);
+  const { model, selectModel } = useSelectedModel();
 
   const { pathResult } = useTreeSitter(selectedFile, fileContent);
+
+  // Check if generation is available (API key is set)
+  useEffect(() => {
+    checkGenerateStatus().then((s) => setGenerateAvailable(s.available)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!selectedFile) {
@@ -85,6 +101,20 @@ export default function App() {
     setRefreshKey((k) => k + 1);
   }, []);
 
+  const handleGenerate = useCallback(
+    async (semanticPath: string) => {
+      if (!selectedFile) return;
+      await generateAnnotation(selectedFile, model, semanticPath);
+    },
+    [selectedFile, model]
+  );
+
+  const handleGenerateFile = useCallback(async () => {
+    if (!selectedFile) return;
+    await generateFileAnnotations(selectedFile, model);
+    handleAnnotationsChanged();
+  }, [selectedFile, model, handleAnnotationsChanged]);
+
   const annotatedPaths = new Set(
     resolvedData ? Object.keys(resolvedData.annotations) : []
   );
@@ -95,6 +125,12 @@ export default function App() {
   }, [pathResult, resolvedData]);
 
   const totalLines = fileContent ? fileContent.split("\n").length : 0;
+
+  // Show the overlay if there are brackets OR if we have semantic nodes (for empty-state generate)
+  const showOverlay =
+    selectedFile &&
+    (annotationBrackets.length > 0 ||
+      (generateAvailable && pathResult && pathResult.roots.length > 0));
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-gray-100">
@@ -107,6 +143,20 @@ export default function App() {
             {selectedFile}
           </span>
         )}
+        <div className="ml-auto flex items-center gap-2">
+          {generateAvailable && (
+            <>
+              <ModelSelector model={model} onSelect={selectModel} />
+              {selectedFile && pathResult && pathResult.roots.length > 0 && (
+                <GenerateButton
+                  label="Generate File"
+                  onClick={handleGenerateFile}
+                  size="md"
+                />
+              )}
+            </>
+          )}
+        </div>
       </header>
       <div className="flex flex-1 overflow-hidden">
         <div className="w-56 flex-shrink-0">
@@ -133,15 +183,16 @@ export default function App() {
               </div>
             )}
           </div>
-          {annotationBrackets.length > 0 && selectedFile && (
+          {showOverlay && (
             <AnnotationOverlay
               editorView={editorView}
               annotations={annotationBrackets}
               totalLines={totalLines}
-              filePath={selectedFile}
+              filePath={selectedFile!}
               onSelectPath={handleSelectPath}
               selectedPath={selectedPath}
               onAnnotationsChanged={handleAnnotationsChanged}
+              onGenerate={generateAvailable ? handleGenerate : undefined}
             />
           )}
         </div>
