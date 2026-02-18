@@ -256,6 +256,13 @@ export default function AnnotationOverlay({
   const [expandedPath, setExpandedPath] = useState<string | null>(null);
   const [addingPath, setAddingPath] = useState<string | null>(null);
 
+  // Auto-expand when a path is selected (e.g. from clicking in the code viewer)
+  useEffect(() => {
+    if (selectedPath) {
+      setExpandedPath(selectedPath);
+    }
+  }, [selectedPath]);
+
   useEffect(() => {
     if (!editorView) return;
     setLineHeight(editorView.defaultLineHeight);

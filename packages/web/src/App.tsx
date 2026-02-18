@@ -25,16 +25,18 @@ function buildBrackets(
 ): AnnotationBracket[] {
   const result: AnnotationBracket[] = [];
   for (const node of nodes) {
-    const anns = annotations[node.path] ?? [];
-    result.push({
-      path: node.path,
-      startLine: node.startLine,
-      endLine: node.endLine,
-      column: depth,
-      body: anns.length > 0 ? anns[0].body : "",
-      count: anns.length,
-      annotations: anns,
-    });
+    const anns = annotations[node.path];
+    if (anns && anns.length > 0) {
+      result.push({
+        path: node.path,
+        startLine: node.startLine,
+        endLine: node.endLine,
+        column: depth,
+        body: anns[0].body,
+        count: anns.length,
+        annotations: anns,
+      });
+    }
     result.push(...buildBrackets(node.children, annotations, depth + 1));
   }
   return result;
@@ -119,8 +121,32 @@ export default function App() {
 
   const annotationBrackets = useMemo(() => {
     if (!pathResult || !resolvedData) return [];
-    return buildBrackets(pathResult.roots, resolvedData.annotations, 0);
-  }, [pathResult, resolvedData]);
+    const brackets = buildBrackets(pathResult.roots, resolvedData.annotations, 0);
+
+    // If a node is selected but has no annotations yet, inject a temporary
+    // bracket so the user can still "+ Add" or "AI Generate" on it.
+    if (
+      selectedPath &&
+      !brackets.some((b) => b.path === selectedPath)
+    ) {
+      const node = pathResult.pathMap.get(selectedPath);
+      if (node) {
+        // Determine depth by counting dots in the path
+        const depth = selectedPath.split(".").length - 1;
+        brackets.push({
+          path: node.path,
+          startLine: node.startLine,
+          endLine: node.endLine,
+          column: depth,
+          body: "",
+          count: 0,
+          annotations: [],
+        });
+      }
+    }
+
+    return brackets;
+  }, [pathResult, resolvedData, selectedPath]);
 
   const totalLines = fileContent ? fileContent.split("\n").length : 0;
 
