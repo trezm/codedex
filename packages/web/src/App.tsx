@@ -25,18 +25,16 @@ function buildBrackets(
 ): AnnotationBracket[] {
   const result: AnnotationBracket[] = [];
   for (const node of nodes) {
-    const anns = annotations[node.path];
-    if (anns && anns.length > 0) {
-      result.push({
-        path: node.path,
-        startLine: node.startLine,
-        endLine: node.endLine,
-        column: depth,
-        body: anns[0].body,
-        count: anns.length,
-        annotations: anns,
-      });
-    }
+    const anns = annotations[node.path] ?? [];
+    result.push({
+      path: node.path,
+      startLine: node.startLine,
+      endLine: node.endLine,
+      column: depth,
+      body: anns.length > 0 ? anns[0].body : "",
+      count: anns.length,
+      annotations: anns,
+    });
     result.push(...buildBrackets(node.children, annotations, depth + 1));
   }
   return result;
@@ -126,11 +124,7 @@ export default function App() {
 
   const totalLines = fileContent ? fileContent.split("\n").length : 0;
 
-  // Show the overlay if there are brackets OR if we have semantic nodes (for empty-state generate)
-  const showOverlay =
-    selectedFile &&
-    (annotationBrackets.length > 0 ||
-      (generateAvailable && pathResult && pathResult.roots.length > 0));
+  const showOverlay = selectedFile && annotationBrackets.length > 0;
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-gray-100">
