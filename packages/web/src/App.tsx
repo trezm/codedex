@@ -268,7 +268,14 @@ export default function App() {
           )}
         </div>
       </header>
-      {mode === "review" && <ReviewView />}
+      {mode === "review" && (
+        <ReviewView
+          onNavigate={(target) => {
+            setMode("annotate");
+            handleNavigate(target);
+          }}
+        />
+      )}
       <div
         className="flex flex-1 overflow-hidden"
         style={{ display: mode === "annotate" ? undefined : "none" }}

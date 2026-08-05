@@ -1,7 +1,13 @@
 import { useState, Fragment } from "react";
-import type { DiffFile, DiffLine, Finding } from "@syl/core";
+import { toSplitRows } from "@syl/core";
+import type { DiffFile, DiffLine, Finding, LinkTarget } from "@syl/core";
 import FindingCard from "./FindingCard";
+import AnnotationNote from "./AnnotationNote";
+import type { DiffAnnotation, DiffAnnotationData } from "./useDiffAnnotations";
+import type { ResolvedLinks } from "../components/AnnotationBody";
 import { SEVERITY_DOT } from "./severity";
+
+export type DiffViewMode = "unified" | "split";
 
 const STATUS_STYLE: Record<string, string> = {
   added: "bg-emerald-500/15 text-emerald-300 border-emerald-500/40",
@@ -22,10 +28,53 @@ function marker(type: DiffLine["type"]): string {
   return " ";
 }
 
-function Gutter({ value }: { value: number | null }) {
+function markerClass(type: DiffLine["type"]): string {
+  if (type === "add") return "text-emerald-400";
+  if (type === "delete") return "text-red-400";
+  return "text-gray-700";
+}
+
+function Gutter({
+  value,
+  type,
+}: {
+  value: number | null;
+  type?: DiffLine["type"];
+}) {
   return (
-    <td className="select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80">
+    <td
+      className={`select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80 ${
+        type ? lineClasses(type) : ""
+      }`}
+    >
       {value ?? ""}
+    </td>
+  );
+}
+
+/** One code cell; `divider` draws the rule between the panes in split mode. */
+function CodeCell({
+  line,
+  divider,
+}: {
+  line: DiffLine | null;
+  divider?: boolean;
+}) {
+  if (!line) {
+    return (
+      <td
+        className={`bg-gray-900/40 ${divider ? "border-r border-gray-800/80" : ""}`}
+      />
+    );
+  }
+  return (
+    <td
+      className={`pl-2 pr-3 whitespace-pre-wrap break-all text-gray-300 align-top ${lineClasses(
+        line.type
+      )} ${divider ? "border-r border-gray-800/80" : ""}`}
+    >
+      <span className={markerClass(line.type)}>{marker(line.type)}</span>
+      {line.text}
     </td>
   );
 }
@@ -35,14 +84,46 @@ export function findingDomId(finding: Finding, index: number): string {
   return `finding-${index}-${finding.file.replace(/[^\w]/g, "_")}-${finding.line}`;
 }
 
+/** First diff line at or after `from` that still falls inside `to`, else null. */
+function firstLineInRange(
+  sortedLines: number[],
+  from: number,
+  to: number
+): number | null {
+  let lo = 0;
+  let hi = sortedLines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (sortedLines[mid] < from) lo = mid + 1;
+    else hi = mid;
+  }
+  const candidate = sortedLines[lo];
+  return candidate !== undefined && candidate <= to ? candidate : null;
+}
+
 interface FileDiffProps {
   file: DiffFile;
   findings: { finding: Finding; index: number }[];
+  annotations: DiffAnnotation[];
+  links: ResolvedLinks;
   activeFindingId: string | null;
+  viewMode: DiffViewMode;
+  onNavigate?: (target: LinkTarget) => void;
 }
 
-function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
+function FileDiff({
+  file,
+  findings,
+  annotations,
+  links,
+  activeFindingId,
+  viewMode,
+  onNavigate,
+}: FileDiffProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [showOffDiff, setShowOffDiff] = useState(false);
+
+  const columns = viewMode === "split" ? 4 : 3;
 
   // Anchor findings to the new-file line they name; anything that doesn't land
   // on a line in the diff is shown at the top of the file instead of dropped.
@@ -64,6 +145,59 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
     }
   }
 
+  // An annotation covers a whole node, so anchor it to the first line of that
+  // node the diff actually shows — a note on a function is worth seeing next to
+  // the changed line inside it, not only when the signature itself changed.
+  const sortedLines = [...linesInFile].sort((a, b) => a - b);
+  const notesByLine = new Map<number, DiffAnnotation[]>();
+  const offDiffNotes: DiffAnnotation[] = [];
+  for (const entry of annotations) {
+    const line = firstLineInRange(sortedLines, entry.startLine, entry.endLine);
+    if (line === null) {
+      offDiffNotes.push(entry);
+      continue;
+    }
+    const list = notesByLine.get(line) ?? [];
+    list.push(entry);
+    notesByLine.set(line, list);
+  }
+
+  /** Cards that hang under a rendered line: findings first, then annotations. */
+  const anchoredRows = (newLine: number | null) => {
+    if (newLine === null) return null;
+    const findingsHere = byLine.get(newLine);
+    const notesHere = notesByLine.get(newLine);
+    if (!findingsHere && !notesHere) return null;
+    return (
+      <>
+        {findingsHere?.map((entry) => (
+          <tr key={`f-${entry.index}`}>
+            <td colSpan={columns} className="bg-gray-950">
+              <FindingCard
+                finding={entry.finding}
+                id={findingDomId(entry.finding, entry.index)}
+                highlighted={
+                  activeFindingId === findingDomId(entry.finding, entry.index)
+                }
+              />
+            </td>
+          </tr>
+        ))}
+        {notesHere?.map((entry) => (
+          <tr key={`a-${entry.path}`}>
+            <td colSpan={columns} className="bg-gray-950">
+              <AnnotationNote
+                entry={entry}
+                links={links}
+                onNavigate={onNavigate}
+              />
+            </td>
+          </tr>
+        ))}
+      </>
+    );
+  };
+
   return (
     <div className="border border-gray-800 rounded-md overflow-hidden mb-4 bg-gray-950">
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-900/70 border-b border-gray-800 sticky top-0 z-10">
@@ -79,6 +213,11 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
             ? `${file.oldPath} → ${file.path}`
             : file.path}
         </span>
+        {annotations.length > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 whitespace-nowrap">
+            {annotations.length} syl
+          </span>
+        )}
         {findings.length > 0 && (
           <span className="flex items-center gap-1">
             {findings.map((f) => (
@@ -115,6 +254,27 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
             />
           ))}
 
+          {offDiffNotes.length > 0 && (
+            <div className="border-b border-gray-800/70">
+              <button
+                className="w-full text-left px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-300"
+                onClick={() => setShowOffDiff((s) => !s)}
+              >
+                {showOffDiff ? "▾" : "▸"} {offDiffNotes.length} annotation
+                {offDiffNotes.length === 1 ? "" : "s"} elsewhere in this file
+              </button>
+              {showOffDiff &&
+                offDiffNotes.map((entry) => (
+                  <AnnotationNote
+                    key={entry.path}
+                    entry={entry}
+                    links={links}
+                    onNavigate={onNavigate}
+                  />
+                ))}
+            </div>
+          )}
+
           {file.binary ? (
             <div className="px-3 py-3 text-xs text-gray-500">Binary file</div>
           ) : file.hunks.length === 0 ? (
@@ -122,58 +282,60 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
               No textual changes
             </div>
           ) : (
-            <table className="w-full border-collapse font-mono text-[12px] leading-[1.5]">
+            <table
+              className={`w-full border-collapse font-mono text-[12px] leading-[1.5] ${
+                viewMode === "split" ? "table-fixed" : ""
+              }`}
+            >
+              {/* Fixed layout keeps the two panes at equal width regardless of
+                  how long the longest line in either of them is. */}
+              {viewMode === "split" && (
+                <colgroup>
+                  <col style={{ width: "3.5rem" }} />
+                  <col style={{ width: "calc(50% - 3.5rem)" }} />
+                  <col style={{ width: "3.5rem" }} />
+                  <col style={{ width: "calc(50% - 3.5rem)" }} />
+                </colgroup>
+              )}
               <tbody>
                 {file.hunks.map((hunk, hunkIndex) => (
                   <Fragment key={hunkIndex}>
                     <tr className="bg-sky-500/5">
                       <td
-                        colSpan={3}
+                        colSpan={columns}
                         className="px-3 py-1 text-[11px] text-sky-300/70 border-y border-gray-800"
                       >
                         {hunk.header}
                       </td>
                     </tr>
-                    {hunk.lines.map((line, lineIndex) => {
-                      const anchored =
-                        line.newLine !== null ? byLine.get(line.newLine) : undefined;
-                      return (
-                        <Fragment key={lineIndex}>
-                          <tr className={lineClasses(line.type)}>
-                            <Gutter value={line.oldLine} />
-                            <Gutter value={line.newLine} />
-                            <td className="pl-2 pr-3 whitespace-pre-wrap break-all text-gray-300">
-                              <span
-                                className={
-                                  line.type === "add"
-                                    ? "text-emerald-400"
-                                    : line.type === "delete"
-                                      ? "text-red-400"
-                                      : "text-gray-700"
-                                }
-                              >
-                                {marker(line.type)}
-                              </span>
-                              {line.text}
-                            </td>
-                          </tr>
-                          {anchored?.map((entry) => (
-                            <tr key={`f-${entry.index}`}>
-                              <td colSpan={3} className="bg-gray-950">
-                                <FindingCard
-                                  finding={entry.finding}
-                                  id={findingDomId(entry.finding, entry.index)}
-                                  highlighted={
-                                    activeFindingId ===
-                                    findingDomId(entry.finding, entry.index)
-                                  }
-                                />
-                              </td>
+                    {viewMode === "split"
+                      ? toSplitRows(hunk.lines).map((row, rowIndex) => (
+                          <Fragment key={rowIndex}>
+                            <tr>
+                              <Gutter
+                                value={row.left?.oldLine ?? null}
+                                type={row.left?.type}
+                              />
+                              <CodeCell line={row.left} divider />
+                              <Gutter
+                                value={row.right?.newLine ?? null}
+                                type={row.right?.type}
+                              />
+                              <CodeCell line={row.right} />
                             </tr>
-                          ))}
-                        </Fragment>
-                      );
-                    })}
+                            {anchoredRows(row.right?.newLine ?? null)}
+                          </Fragment>
+                        ))
+                      : hunk.lines.map((line, lineIndex) => (
+                          <Fragment key={lineIndex}>
+                            <tr>
+                              <Gutter value={line.oldLine} type={line.type} />
+                              <Gutter value={line.newLine} type={line.type} />
+                              <CodeCell line={line} />
+                            </tr>
+                            {anchoredRows(line.newLine)}
+                          </Fragment>
+                        ))}
                   </Fragment>
                 ))}
               </tbody>
@@ -189,10 +351,16 @@ export default function DiffView({
   files,
   findings,
   activeFindingId,
+  viewMode,
+  annotationData,
+  onNavigate,
 }: {
   files: DiffFile[];
   findings: Finding[];
   activeFindingId: string | null;
+  viewMode: DiffViewMode;
+  annotationData: DiffAnnotationData;
+  onNavigate?: (target: LinkTarget) => void;
 }) {
   const indexed = findings.map((finding, index) => ({ finding, index }));
   const byFile = new Map<string, { finding: Finding; index: number }[]>();
@@ -212,7 +380,11 @@ export default function DiffView({
           key={file.path}
           file={file}
           findings={byFile.get(file.path) ?? []}
+          annotations={annotationData.byFile[file.path] ?? []}
+          links={annotationData.linksByFile[file.path] ?? {}}
           activeFindingId={activeFindingId}
+          viewMode={viewMode}
+          onNavigate={onNavigate}
         />
       ))}
 
