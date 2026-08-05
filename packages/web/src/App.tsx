@@ -1,20 +1,27 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import type { Annotation, SemanticNode } from "@syl/core";
+import { collectRefs } from "@syl/core";
+import type { Annotation, SemanticNode, LinkTarget } from "@syl/core";
 import type { EditorView } from "@codemirror/view";
 import FileBrowser from "./components/FileBrowser";
 import CodeViewer from "./components/CodeViewer";
 import AnnotationOverlay, {
   AnnotationBracket,
 } from "./components/AnnotationOverlay";
-import ModelSelector, { useSelectedModel } from "./components/ModelSelector";
+import ModelSelector, {
+  useSelectedModel,
+  type AvailableModel,
+} from "./components/ModelSelector";
 import GenerateButton from "./components/GenerateButton";
 import { useTreeSitter } from "./hooks/useTreeSitter";
+import ReviewView from "./review/ReviewView";
+import type { ResolvedLinks } from "./components/AnnotationBody";
 import {
   fetchFileContent,
   resolveAnnotations,
   generateAnnotation,
   generateFileAnnotations,
   checkGenerateStatus,
+  resolveLinks,
   ResolveResponse,
 } from "./api";
 
@@ -42,35 +49,56 @@ function buildBrackets(
   return result;
 }
 
+type Mode = "annotate" | "review";
+
 export default function App() {
+  const [mode, setMode] = useState<Mode>("annotate");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState<string | null>(null);
+  /** Which file `fileContent` actually belongs to — lags selectedFile while loading. */
+  const [loadedFile, setLoadedFile] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [resolvedData, setResolvedData] = useState<ResolveResponse | null>(
     null
   );
   const [refreshKey, setRefreshKey] = useState(0);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
-  const [generateAvailable, setGenerateAvailable] = useState(false);
-  const { model, selectModel } = useSelectedModel();
+  const [links, setLinks] = useState<ResolvedLinks>({});
+  const [pendingTarget, setPendingTarget] = useState<LinkTarget | null>(null);
+  const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(
+    null
+  );
+  const [models, setModels] = useState<AvailableModel[]>([]);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const { model, selectModel } = useSelectedModel(models, defaultModel);
 
   const { pathResult } = useTreeSitter(selectedFile, fileContent);
 
-  // Check if generation is available (API key is set)
+  // Which models the server can actually run (i.e. whose API key is set)
   useEffect(() => {
-    checkGenerateStatus().then((s) => setGenerateAvailable(s.available)).catch(() => {});
+    checkGenerateStatus()
+      .then((s) => {
+        setModels(s.models ?? []);
+        setDefaultModel(s.defaultModel ?? null);
+      })
+      .catch(() => {});
   }, []);
+
+  const generateAvailable = model !== null;
 
   useEffect(() => {
     if (!selectedFile) {
       setFileContent(null);
+      setLoadedFile(null);
       setSelectedPath(null);
       setResolvedData(null);
       return;
     }
     let cancelled = false;
     fetchFileContent(selectedFile).then((data) => {
-      if (!cancelled) setFileContent(data.content);
+      if (cancelled) return;
+      setFileContent(data.content);
+      setLoadedFile(selectedFile);
     });
     return () => {
       cancelled = true;
@@ -88,9 +116,52 @@ export default function App() {
     };
   }, [selectedFile, refreshKey]);
 
+  // Resolve every ref in this file's annotations in one round trip
+  useEffect(() => {
+    if (!selectedFile || !resolvedData) {
+      setLinks({});
+      return;
+    }
+    const refs = new Set<string>();
+    for (const annotations of Object.values(resolvedData.annotations)) {
+      for (const annotation of annotations) {
+        for (const ref of collectRefs(annotation.body)) refs.add(ref);
+      }
+    }
+    if (refs.size === 0) {
+      setLinks({});
+      return;
+    }
+    let cancelled = false;
+    resolveLinks(selectedFile, [...refs])
+      .then((resolved) => {
+        if (!cancelled) setLinks(resolved);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFile, resolvedData]);
+
+  // A link may point at another file. Wait for that file's content to be the
+  // content actually on screen, otherwise the line would be revealed against
+  // the outgoing file.
+  useEffect(() => {
+    if (!pendingTarget || loadedFile !== pendingTarget.file) return;
+    setSelectedPath(pendingTarget.kind === "line" ? null : pendingTarget.path);
+    setReveal({ line: pendingTarget.startLine, nonce: Date.now() });
+    setPendingTarget(null);
+  }, [pendingTarget, loadedFile]);
+
+  const handleNavigate = useCallback((target: LinkTarget) => {
+    setSelectedFile(target.file);
+    setPendingTarget(target);
+  }, []);
+
   const handleFileSelect = useCallback((path: string) => {
     setSelectedFile(path);
     setSelectedPath(null);
+    setReveal(null);
   }, []);
 
   const handleSelectPath = useCallback((path: string | null) => {
@@ -103,14 +174,14 @@ export default function App() {
 
   const handleGenerate = useCallback(
     async (semanticPath: string) => {
-      if (!selectedFile) return;
+      if (!selectedFile || !model) return;
       await generateAnnotation(selectedFile, model, semanticPath);
     },
     [selectedFile, model]
   );
 
   const handleGenerateFile = useCallback(async () => {
-    if (!selectedFile) return;
+    if (!selectedFile || !model) return;
     await generateFileAnnotations(selectedFile, model);
     handleAnnotationsChanged();
   }, [selectedFile, model, handleAnnotationsChanged]);
@@ -158,15 +229,34 @@ export default function App() {
         <h1 className="text-sm font-semibold tracking-wide text-gray-300">
           syl
         </h1>
-        {selectedFile && (
+        <nav className="ml-4 flex items-center gap-1">
+          {(["annotate", "review"] as Mode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`text-xs px-2 py-1 rounded capitalize ${
+                mode === m
+                  ? "bg-gray-800 text-gray-100"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </nav>
+        {mode === "annotate" && selectedFile && (
           <span className="ml-3 text-xs text-gray-500 font-mono">
             {selectedFile}
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {generateAvailable && (
+          {mode === "annotate" && generateAvailable && (
             <>
-              <ModelSelector model={model} onSelect={selectModel} />
+              <ModelSelector
+                models={models}
+                model={model}
+                onSelect={selectModel}
+              />
               {selectedFile && pathResult && pathResult.roots.length > 0 && (
                 <GenerateButton
                   label="Generate File"
@@ -178,7 +268,11 @@ export default function App() {
           )}
         </div>
       </header>
-      <div className="flex flex-1 overflow-hidden">
+      {mode === "review" && <ReviewView />}
+      <div
+        className="flex flex-1 overflow-hidden"
+        style={{ display: mode === "annotate" ? undefined : "none" }}
+      >
         <div className="w-56 flex-shrink-0">
           <FileBrowser
             onSelect={handleFileSelect}
@@ -196,6 +290,7 @@ export default function App() {
                 selectedPath={selectedPath}
                 onSelectPath={handleSelectPath}
                 onViewReady={setEditorView}
+                reveal={reveal}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-600">
@@ -213,6 +308,8 @@ export default function App() {
               selectedPath={selectedPath}
               onAnnotationsChanged={handleAnnotationsChanged}
               onGenerate={generateAvailable ? handleGenerate : undefined}
+              links={links}
+              onNavigate={handleNavigate}
             />
           )}
         </div>

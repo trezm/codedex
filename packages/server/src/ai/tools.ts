@@ -1,12 +1,27 @@
-import type Anthropic from "@anthropic-ai/sdk";
+/**
+ * Provider-neutral tool definitions. Each provider adapts these into its own
+ * wire format (Anthropic uses `input_schema`, OpenAI nests them under
+ * `function.parameters`).
+ */
+export interface ToolParameterSchema {
+  type: "object";
+  properties: Record<string, unknown>;
+  required: string[];
+}
 
-export const toolSchemas: Anthropic.Tool[] = [
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: ToolParameterSchema;
+}
+
+export const toolDefinitions: ToolDefinition[] = [
   {
     name: "get_semantic_tree",
     description:
       "Get the semantic tree of the current file being annotated. Returns a hierarchical structure of named code elements (functions, classes, variables, etc.) with their semantic paths, kinds, and line ranges. Use this to understand the file structure before annotating.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {},
       required: [],
     },
@@ -15,8 +30,8 @@ export const toolSchemas: Anthropic.Tool[] = [
     name: "get_node_source",
     description:
       "Get the source code of a specific semantic node by its path. Use this to read the implementation details of a function, class, or other code element before writing an annotation for it.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         semantic_path: {
           type: "string",
@@ -31,8 +46,8 @@ export const toolSchemas: Anthropic.Tool[] = [
     name: "get_file_content",
     description:
       "Read the full content of a file in the project. Use this to understand imports, dependencies, or related code in other files.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         file_path: {
           type: "string",
@@ -46,8 +61,8 @@ export const toolSchemas: Anthropic.Tool[] = [
     name: "save_annotations",
     description:
       "Save annotations for one or more semantic paths. Call this when you have analyzed the code and are ready to write annotations. Each annotation should be a concise, insightful description of what the code element does, its purpose, and any important details.",
-    input_schema: {
-      type: "object" as const,
+    parameters: {
+      type: "object",
       properties: {
         annotations: {
           type: "array",

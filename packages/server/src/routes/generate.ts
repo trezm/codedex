@@ -8,7 +8,8 @@ import {
   buildSemanticPaths,
 } from "@syl/core";
 import { nodeFs } from "../util/node-fs.js";
-import { generateAnnotations } from "../claude/generate.js";
+import { generateAnnotations } from "../ai/generate.js";
+import { listModels, defaultModelId, resolveModel } from "../ai/models.js";
 
 export function generateRoutes(
   projectRoot: string,
@@ -19,13 +20,18 @@ export function generateRoutes(
   const sylDir = path.join(projectRoot, ".syl");
   const store = new AnnotationStore(sylDir, nodeFs());
 
-  // GET /api/generate/status — check if API key is configured
-  app.get("/status", (c) => {
-    const hasKey = !!process.env.ANTHROPIC_API_KEY;
-    return c.json({ available: hasKey });
+  // GET /api/generate/status — which models are runnable, and on which backend
+  app.get("/status", async (c) => {
+    const models = await listModels();
+    const defaultModel = await defaultModelId();
+    return c.json({
+      available: models.some((m) => m.available),
+      defaultModel,
+      models,
+    });
   });
 
-  // POST /api/generate — generate annotations via Claude
+  // POST /api/generate — generate annotations via the selected model
   app.post("/", async (c) => {
     const { file, model, semanticPath } = await c.req.json<{
       file: string;
@@ -35,6 +41,10 @@ export function generateRoutes(
 
     if (!file || !model) {
       return c.json({ error: "file and model are required" }, 400);
+    }
+
+    if (!resolveModel(model)) {
+      return c.json({ error: `Unknown model "${model}"` }, 400);
     }
 
     const langConfig = getLanguageForFile(file);

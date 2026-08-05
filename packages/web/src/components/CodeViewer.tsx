@@ -1,5 +1,12 @@
 import { useEffect, useRef, useMemo } from "react";
-import { EditorView, gutter, GutterMarker, lineNumbers } from "@codemirror/view";
+import {
+  EditorView,
+  gutter,
+  GutterMarker,
+  lineNumbers,
+  Decoration,
+  type DecorationSet,
+} from "@codemirror/view";
 import { EditorState, StateField, StateEffect, RangeSet } from "@codemirror/state";
 import { javascript } from "@codemirror/lang-javascript";
 import { python } from "@codemirror/lang-python";
@@ -14,6 +21,8 @@ interface CodeViewerProps {
   selectedPath: string | null;
   onSelectPath: (path: string | null) => void;
   onViewReady?: (view: EditorView | null) => void;
+  /** Scroll to and briefly highlight a line; `nonce` re-triggers the same line. */
+  reveal?: { line: number; nonce: number } | null;
 }
 
 class AnnotationMarker extends GutterMarker {
@@ -57,6 +66,32 @@ function annotationGutter() {
   });
 }
 
+const setHighlightLine = StateEffect.define<number | null>();
+
+const highlightLineDecoration = Decoration.line({
+  class: "cm-syl-target-line",
+});
+
+const highlightLineField = StateField.define<DecorationSet>({
+  create() {
+    return Decoration.none;
+  },
+  update(value, tr) {
+    for (const effect of tr.effects) {
+      if (!effect.is(setHighlightLine)) continue;
+      const line = effect.value;
+      if (line === null || line < 1 || line > tr.state.doc.lines) {
+        return Decoration.none;
+      }
+      return Decoration.set([
+        highlightLineDecoration.range(tr.state.doc.line(line).from),
+      ]);
+    }
+    return tr.docChanged ? Decoration.none : value;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 function getLanguageExtension(filePath: string) {
   if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filePath))
     return javascript({
@@ -75,6 +110,7 @@ export default function CodeViewer({
   selectedPath,
   onSelectPath,
   onViewReady,
+  reveal,
 }: CodeViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -108,6 +144,7 @@ export default function CodeViewer({
           lineNumbers(),
           annotationLinesField,
           annotationGutter(),
+          highlightLineField,
           EditorView.domEventHandlers({
             click(event, view) {
               const pr = pathResultRef.current;
@@ -135,6 +172,10 @@ export default function CodeViewer({
               color: "#6b7280",
               fontSize: "12px",
             },
+            ".cm-syl-target-line": {
+              backgroundColor: "rgba(96, 165, 250, 0.18)",
+              outline: "1px solid rgba(96, 165, 250, 0.35)",
+            },
           }),
         ],
       }),
@@ -156,6 +197,25 @@ export default function CodeViewer({
     if (!view) return;
     view.dispatch({ effects: setAnnotationLines.of(annotatedLines) });
   }, [annotatedLines]);
+
+  // Deliberately keyed on `reveal` alone: re-running this when `content`
+  // changes would re-apply a stale line number to a newly opened file.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    if (!reveal) {
+      view.dispatch({ effects: setHighlightLine.of(null) });
+      return;
+    }
+    const line = Math.min(Math.max(reveal.line, 1), view.state.doc.lines);
+    const pos = view.state.doc.line(line).from;
+    view.dispatch({
+      effects: [
+        setHighlightLine.of(line),
+        EditorView.scrollIntoView(pos, { y: "center" }),
+      ],
+    });
+  }, [reveal]);
 
   return <div ref={containerRef} className="h-full overflow-hidden" />;
 }

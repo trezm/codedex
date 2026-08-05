@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isIgnoredEntry } from "../util/project-files.js";
 
 export interface FileNode {
   name: string;
@@ -8,16 +9,6 @@ export interface FileNode {
   type: "file" | "directory";
   children?: FileNode[];
 }
-
-const IGNORED = new Set([
-  "node_modules",
-  ".git",
-  ".syl",
-  "dist",
-  ".next",
-  "__pycache__",
-  ".DS_Store",
-]);
 
 const BINARY_EXTENSIONS = new Set([
   ".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2",
@@ -29,8 +20,7 @@ async function buildTree(dirPath: string, relativeTo: string): Promise<FileNode[
   const nodes: FileNode[] = [];
 
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-    if (IGNORED.has(entry.name)) continue;
-    if (entry.name.startsWith(".")) continue;
+    if (isIgnoredEntry(entry.name)) continue;
 
     const fullPath = path.join(dirPath, entry.name);
     const relPath = path.relative(relativeTo, fullPath);

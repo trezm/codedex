@@ -8,6 +8,9 @@ import { createRequire } from "node:module";
 import { fileRoutes } from "./routes/files.js";
 import { annotationRoutes } from "./routes/annotations.js";
 import { generateRoutes } from "./routes/generate.js";
+import { linkRoutes } from "./routes/links.js";
+import { reviewRoutes } from "./routes/review.js";
+import { ProjectIndex } from "./links/project-index.js";
 
 // Import language registrations
 import "@syl/core";
@@ -15,7 +18,11 @@ import "@syl/core";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
-const projectRoot = process.env.SYL_PROJECT_ROOT || process.cwd();
+// npm runs workspace scripts with cwd set to the workspace dir, so process.cwd()
+// would resolve to packages/server. INIT_CWD is where npm was actually invoked.
+const projectRoot = path.resolve(
+  process.env.SYL_PROJECT_ROOT || process.env.INIT_CWD || process.cwd()
+);
 const port = parseInt(process.env.PORT || "3000", 10);
 
 // Resolve WASM directories
@@ -26,10 +33,18 @@ const app = new Hono();
 
 app.use("*", cors());
 
+const projectIndex = new ProjectIndex(
+  projectRoot,
+  grammarWasmDir,
+  treeSitterWasmDir
+);
+
 // API routes
 app.route("/api/files", fileRoutes(projectRoot));
 app.route("/api/annotations", annotationRoutes(projectRoot, grammarWasmDir, treeSitterWasmDir));
 app.route("/api/generate", generateRoutes(projectRoot, grammarWasmDir, treeSitterWasmDir));
+app.route("/api/links", linkRoutes(projectRoot, projectIndex));
+app.route("/api/review", reviewRoutes(projectRoot));
 
 // Serve WASM files — check tree-sitter runtime dir first, then grammar dir
 app.get("/wasm/:file", async (c) => {

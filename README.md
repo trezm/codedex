@@ -17,6 +17,97 @@ By default, Syl annotates the project in the current working directory. To point
 SYL_PROJECT_ROOT=/path/to/project npm run dev
 ```
 
+## PR Review
+
+The **Review** tab runs a two-stage review over a GitHub pull request, in the
+style of [firstpass](https://github.com/trezm/firstpass): a cheap **scout** model
+triages the diff into focus areas, then a stronger **reviewer** produces only
+high-confidence findings.
+
+Syl reads the git remotes of whatever project it is pointed at, you pick a remote
+and a PR number, and the result opens as a GitHub-style review page: the diff with
+findings anchored as inline comments on the line they refer to, plus a findings
+sidebar and the reviewer's summary.
+
+Requires the [GitHub CLI](https://cli.github.com/) on your `PATH` and
+authenticated (`gh auth login`) — it is used for `pr list`, `pr view`, and
+`pr diff`.
+
+Model defaults are `claude-haiku-4-5` for the scout and `claude-opus-5` for the
+reviewer, falling back to whatever is actually runnable. Both stages go through
+the `claude`/`codex` CLI when available, so a review costs subscription usage
+rather than API tokens. Runs are held in memory, so restarting the server clears
+them.
+
+## Links in Annotations
+
+Annotations can point at other places in the codebase. Any symbol you wrap in
+backticks becomes a link when it resolves:
+
+```
+Replaced by the `SYL_OPENAI_MODELS` env override — see `OPENAI_MODELS`.
+```
+
+Resolution runs against a project-wide index: the current file first, then the
+whole project. A backtick span that is ambiguous or matches nothing stays plain
+text, so prose is never mangled into a wrong link.
+
+For targets a bare symbol can't express, use an explicit link:
+
+| Syntax | Links to |
+| --- | --- |
+| `[[src/models.ts]]` | a file |
+| `[[src/models.ts#OPENAI_MODELS]]` | a symbol in a specific file |
+| `[[src/models.ts:42]]` / `[[src/models.ts:42-50]]` | a line or line range |
+| `[[@a1b2c3d4]]` | another annotation, by id |
+| `[[src/models.ts:42\|the fallback]]` | any of the above, with custom link text |
+
+Unlike backticks, an explicit `[[...]]` that fails to resolve is shown struck
+through — a broken link is surfaced rather than silently rendered as prose.
+
+Clicking a link opens the target file and highlights the line. Generated
+annotations use this syntax too; the prompt tells the model to reference real
+symbols rather than describe them.
+
+## AI-Generated Annotations
+
+Syl can draft annotations for you with either Claude or ChatGPT.
+
+**Syl prefers the CLIs.** If [`claude`](https://docs.claude.com/en/docs/claude-code)
+or [`codex`](https://developers.openai.com/codex/cli) is on your `PATH`, model
+calls go through it — which means they run on your existing subscription instead
+of per-token API billing. API keys are the fallback for whichever provider has no
+CLI installed:
+
+| Provider | Preferred | Fallback |
+| --- | --- | --- |
+| Claude | `claude` CLI | `ANTHROPIC_API_KEY` |
+| ChatGPT | `codex` CLI | `OPENAI_API_KEY` |
+
+The model picker marks each model `· cli` or `· api` so you can see which one is
+about to bill you, and the review page records the backend used for each stage.
+Set `SYL_PREFER_SDK=1` to force the API path.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # only needed without the claude CLI
+export OPENAI_API_KEY=sk-...          # only needed without the codex CLI
+```
+
+| Provider | Models |
+| --- | --- |
+| Claude | Opus 5 (default), Sonnet 5, Haiku 4.5 |
+| ChatGPT | GPT-5, GPT-5 mini, GPT-4.1, GPT-4o |
+
+OpenAI model availability varies by account and tier. To use a different set,
+override the list:
+
+```bash
+SYL_OPENAI_MODELS=gpt-5,o4-mini npm run dev
+```
+
+Generated annotations are stored with an author of `claude` or `chatgpt`, so you
+can tell them apart from your own.
+
 ## How It Works
 
 1. **Select a file** in the sidebar

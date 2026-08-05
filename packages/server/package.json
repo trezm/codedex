@@ -11,6 +11,7 @@
     "@hono/node-server": "^1.13.0",
     "@syl/core": "*",
     "hono": "^4.6.0",
+    "openai": "^7.4.0",
     "tree-sitter-wasms": "^0.1.12",
     "web-tree-sitter": "^0.24.7"
   },

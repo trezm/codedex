@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { EditorView } from "@codemirror/view";
-import type { Annotation } from "@syl/core";
+import type { Annotation, LinkTarget } from "@syl/core";
 import { addAnnotation, updateAnnotation, deleteAnnotation } from "../api";
 import GenerateButton from "./GenerateButton";
+import AnnotationBody, { type ResolvedLinks } from "./AnnotationBody";
 
 export interface AnnotationBracket {
   path: string;
@@ -23,6 +24,8 @@ interface AnnotationOverlayProps {
   selectedPath: string | null;
   onAnnotationsChanged: () => void;
   onGenerate?: (semanticPath: string) => Promise<void>;
+  links: ResolvedLinks;
+  onNavigate?: (target: LinkTarget) => void;
 }
 
 const COLUMN_WIDTH = 18;
@@ -91,11 +94,15 @@ function InlineAnnotationCard({
   filePath,
   semanticPath,
   onChanged,
+  links,
+  onNavigate,
 }: {
   annotation: Annotation;
   filePath: string;
   semanticPath: string;
   onChanged: () => void;
+  links: ResolvedLinks;
+  onNavigate?: (target: LinkTarget) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState(annotation.body);
@@ -150,7 +157,11 @@ function InlineAnnotationCard({
 
   return (
     <div className="mb-1 bg-gray-900/90 rounded px-2 py-1 border border-gray-700/50 group/card">
-      <div className="whitespace-pre-wrap break-words">{annotation.body}</div>
+      <AnnotationBody
+        body={annotation.body}
+        links={links}
+        onNavigate={onNavigate}
+      />
       <div className="flex items-center justify-between mt-0.5">
         <div className="text-[10px] text-gray-500">{annotation.author}</div>
         <div className="flex gap-2 text-[10px] text-gray-600 opacity-0 group-hover/card:opacity-100 transition-opacity">
@@ -249,6 +260,8 @@ export default function AnnotationOverlay({
   selectedPath,
   onAnnotationsChanged,
   onGenerate,
+  links,
+  onNavigate,
 }: AnnotationOverlayProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [lineHeight, setLineHeight] = useState(18.4);
@@ -391,6 +404,8 @@ export default function AnnotationOverlay({
                         filePath={filePath}
                         semanticPath={bracket.path}
                         onChanged={onAnnotationsChanged}
+                        links={links}
+                        onNavigate={onNavigate}
                       />
                     ))}
                     {addingPath === bracket.path ? (

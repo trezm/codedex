@@ -1,25 +1,57 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
+import {
+  PROVIDER_LABELS,
+  PROVIDER_ENV_KEYS,
+  type ModelInfo,
+  type ModelProvider,
+} from "@syl/core";
 
-const MODELS = [
-  { id: "claude-sonnet-4-5-20250929", label: "Sonnet 4.5" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-  { id: "claude-opus-4-6", label: "Opus 4.6" },
-] as const;
+export interface AvailableModel extends ModelInfo {
+  available: boolean;
+  /** "cli" runs on your Claude/Codex subscription; "sdk" bills per token. */
+  backend?: "cli" | "sdk" | null;
+  cli?: boolean;
+  sdk?: boolean;
+}
+
+const CLI_FOR_PROVIDER: Record<ModelProvider, string> = {
+  anthropic: "claude",
+  openai: "codex",
+};
 
 const STORAGE_KEY = "syl-selected-model";
-const DEFAULT_MODEL = MODELS[0].id;
 
-export function useSelectedModel() {
-  const [model, setModel] = useState<string>(() => {
+const PROVIDER_ORDER: ModelProvider[] = ["anthropic", "openai"];
+
+/**
+ * Tracks the selected model against the server's model list. A stored id that
+ * the server no longer offers (a retired model, or one whose API key was
+ * removed) falls back rather than sticking around and failing at generate time.
+ */
+export function useSelectedModel(
+  models: AvailableModel[],
+  defaultModel: string | null
+) {
+  const [stored, setStored] = useState<string | null>(() => {
     try {
-      return localStorage.getItem(STORAGE_KEY) || DEFAULT_MODEL;
+      return localStorage.getItem(STORAGE_KEY);
     } catch {
-      return DEFAULT_MODEL;
+      return null;
     }
   });
 
+  const model = useMemo(() => {
+    const usable = models.filter((m) => m.available);
+    if (usable.length === 0) return null;
+    if (stored && usable.some((m) => m.id === stored)) return stored;
+    if (defaultModel && usable.some((m) => m.id === defaultModel)) {
+      return defaultModel;
+    }
+    return usable[0].id;
+  }, [models, defaultModel, stored]);
+
   const selectModel = useCallback((id: string) => {
-    setModel(id);
+    setStored(id);
     try {
       localStorage.setItem(STORAGE_KEY, id);
     } catch {
@@ -31,22 +63,35 @@ export function useSelectedModel() {
 }
 
 export default function ModelSelector({
+  models,
   model,
   onSelect,
 }: {
-  model: string;
+  models: AvailableModel[];
+  model: string | null;
   onSelect: (model: string) => void;
 }) {
+  const groups = PROVIDER_ORDER.map((provider) => ({
+    provider,
+    models: models.filter((m) => m.provider === provider),
+  })).filter((g) => g.models.length > 0);
+
   return (
     <select
-      value={model}
+      value={model ?? ""}
       onChange={(e) => onSelect(e.target.value)}
       className="bg-gray-800 text-gray-300 text-xs border border-gray-700 rounded px-2 py-1 focus:outline-none focus:border-purple-500"
     >
-      {MODELS.map((m) => (
-        <option key={m.id} value={m.id}>
-          {m.label}
-        </option>
+      {groups.map((group) => (
+        <optgroup key={group.provider} label={PROVIDER_LABELS[group.provider]}>
+          {group.models.map((m) => (
+            <option key={m.id} value={m.id} disabled={!m.available}>
+              {m.available
+                ? `${m.label}${m.backend === "cli" ? " · cli" : m.backend === "sdk" ? " · api" : ""}`
+                : `${m.label} — install ${CLI_FOR_PROVIDER[group.provider]} or set ${PROVIDER_ENV_KEYS[group.provider]}`}
+            </option>
+          ))}
+        </optgroup>
       ))}
     </select>
   );

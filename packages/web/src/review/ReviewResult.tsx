@@ -1,0 +1,223 @@
+import { useMemo, useRef, useState } from "react";
+import {
+  parseUnifiedDiff,
+  diffTotals,
+  sortFindings,
+  type ReviewRun,
+} from "@syl/core";
+import DiffView, { findingDomId } from "./DiffView";
+import { SEVERITY_STYLE, SEVERITY_DOT, RISK_STYLE } from "./severity";
+
+export default function ReviewResult({
+  run,
+  onNewReview,
+}: {
+  run: ReviewRun;
+  onNewReview: () => void;
+}) {
+  const [activeFindingId, setActiveFindingId] = useState<string | null>(null);
+  const [showScout, setShowScout] = useState(false);
+
+  const files = useMemo(
+    () => (run.diff ? parseUnifiedDiff(run.diff) : []),
+    [run.diff]
+  );
+  const totals = useMemo(() => diffTotals(files), [files]);
+  const findings = useMemo(
+    () => sortFindings(run.review?.findings ?? []),
+    [run.review]
+  );
+
+  const diffPaneRef = useRef<HTMLElement>(null);
+
+  // A big PR makes for a very tall scroll container, and `scrollIntoView` with
+  // smooth behaviour doesn't reliably traverse tens of thousands of pixels.
+  // Compute the offset against the pane and jump straight there.
+  //
+  // Done synchronously rather than in requestAnimationFrame: every finding is
+  // already in the DOM (only the highlight depends on state), and rAF never
+  // fires in a backgrounded tab, which would silently drop the jump.
+  const jumpTo = (index: number) => {
+    const id = findingDomId(findings[index], index);
+    setActiveFindingId(id);
+    const pane = diffPaneRef.current;
+    const el = document.getElementById(id);
+    if (!pane || !el) return;
+    const offset =
+      el.getBoundingClientRect().top -
+      pane.getBoundingClientRect().top +
+      pane.scrollTop;
+    pane.scrollTo({ top: Math.max(0, offset - pane.clientHeight / 3) });
+  };
+
+  const meta = run.meta;
+
+  return (
+    <div className="flex-1 overflow-hidden flex flex-col">
+      {/* PR header */}
+      <div className="border-b border-gray-800 px-5 py-3 bg-gray-950">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <h2 className="text-base text-gray-100 font-medium">
+            {meta?.title ?? `Pull request #${run.number}`}
+          </h2>
+          <span className="text-gray-500 font-mono text-sm">#{run.number}</span>
+          {meta && (
+            <a
+              className="text-xs text-blue-400 hover:underline"
+              href={meta.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              view on GitHub ↗
+            </a>
+          )}
+          <button
+            className="ml-auto text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+            onClick={onNewReview}
+          >
+            New review
+          </button>
+        </div>
+        <div className="mt-1 text-xs text-gray-500 flex items-center gap-3 flex-wrap">
+          <span className="font-mono">{run.repo}</span>
+          {meta && (
+            <span>
+              @{meta.author} wants to merge{" "}
+              <span className="font-mono text-gray-400">{meta.head}</span> into{" "}
+              <span className="font-mono text-gray-400">{meta.base}</span>
+            </span>
+          )}
+          <span>
+            {files.length} file{files.length === 1 ? "" : "s"}{" "}
+            <span className="text-emerald-400">+{totals.additions}</span>{" "}
+            <span className="text-red-400">−{totals.deletions}</span>
+          </span>
+          <span className="text-gray-600">
+            scout {run.scoutModel}
+            {run.scoutBackend && ` (${run.scoutBackend})`} · reviewer{" "}
+            {run.reviewerModel}
+            {run.reviewerBackend && ` (${run.reviewerBackend})`}
+          </span>
+        </div>
+        {run.diffTruncated && (
+          <div className="mt-2 text-xs text-amber-300">
+            The diff was too large to send in full — the models saw a truncated
+            version, so coverage may be incomplete.
+          </div>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-hidden flex">
+        {/* Findings sidebar */}
+        <aside className="w-80 flex-shrink-0 border-r border-gray-800 overflow-y-auto bg-gray-950">
+          <div className="px-4 py-3 border-b border-gray-800">
+            <div className="text-xs uppercase tracking-wide text-gray-500">
+              Review summary
+            </div>
+            <p className="mt-2 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed">
+              {run.review?.summary || "No summary returned."}
+            </p>
+          </div>
+
+          {run.scout && (
+            <div className="px-4 py-3 border-b border-gray-800">
+              <button
+                className="text-xs uppercase tracking-wide text-gray-500 hover:text-gray-300 flex items-center gap-1"
+                onClick={() => setShowScout((s) => !s)}
+              >
+                <span>{showScout ? "▾" : "▸"}</span> Scout triage
+              </button>
+              {showScout && (
+                <div className="mt-2 space-y-2">
+                  <p className="text-xs text-gray-400 leading-relaxed">
+                    {run.scout.intent}
+                  </p>
+                  {run.scout.focus_areas.map((area, i) => (
+                    <div key={i} className="text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`text-[10px] px-1 py-0.5 rounded border ${
+                            RISK_STYLE[area.risk] ?? RISK_STYLE.low
+                          }`}
+                        >
+                          {area.risk}
+                        </span>
+                        <span className="font-mono text-gray-400 truncate">
+                          {area.file}
+                        </span>
+                      </div>
+                      <p className="text-gray-500 mt-0.5">{area.reason}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="px-4 py-2 text-xs uppercase tracking-wide text-gray-500 border-b border-gray-800">
+            {findings.length} finding{findings.length === 1 ? "" : "s"}
+          </div>
+
+          {findings.length === 0 ? (
+            <div className="px-4 py-6 text-sm text-gray-500">
+              No findings — the reviewer had nothing high-confidence to report.
+            </div>
+          ) : (
+            <ul className="divide-y divide-gray-800/70">
+              {findings.map((finding, index) => {
+                const id = findingDomId(finding, index);
+                return (
+                  <li key={id}>
+                    <button
+                      className={`w-full text-left px-4 py-2.5 hover:bg-gray-900 ${
+                        activeFindingId === id ? "bg-blue-500/10" : ""
+                      }`}
+                      onClick={() => jumpTo(index)}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            SEVERITY_DOT[finding.severity]
+                          }`}
+                        />
+                        <span
+                          className={`text-[10px] uppercase px-1 py-0.5 rounded border ${
+                            SEVERITY_STYLE[finding.severity]
+                          }`}
+                        >
+                          {finding.severity}
+                        </span>
+                        <span className="text-[10px] text-gray-500 uppercase">
+                          {finding.category}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-200 leading-snug">
+                        {finding.title}
+                      </div>
+                      <div className="mt-0.5 text-[11px] font-mono text-gray-600 truncate">
+                        {finding.file}:{finding.line}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </aside>
+
+        {/* Diff */}
+        <main ref={diffPaneRef} className="flex-1 overflow-y-auto px-4 py-4">
+          {files.length === 0 ? (
+            <div className="text-sm text-gray-500">No diff to display.</div>
+          ) : (
+            <DiffView
+              files={files}
+              findings={findings}
+              activeFindingId={activeFindingId}
+            />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}

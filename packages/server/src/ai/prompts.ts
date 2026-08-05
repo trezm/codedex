@@ -1,3 +1,14 @@
+const LINK_SYNTAX = `Linking:
+- Wrap any symbol you mention in backticks — \`OPENAI_MODELS\`, \`Store.load\`. These
+  are turned into clickable links automatically when they resolve to real code,
+  so prefer naming the actual symbol over describing it.
+- For a target backticks can't express, use an explicit link:
+    [[src/models.ts#OPENAI_MODELS]]   a symbol in another file
+    [[src/models.ts:42]]              a line (or :42-50 for a range)
+    [[src/models.ts:42|the fallback]] with custom link text
+- Only reference symbols and files you have actually read via the tools. A
+  reference that doesn't resolve is shown to the reader as broken.`;
+
 export function singleElementPrompt(
   filePath: string,
   semanticPath: string
@@ -17,7 +28,9 @@ Your annotation should:
 - Explain what the code element does and its purpose
 - Be concise (1-3 sentences)
 - Note any important behaviors, side effects, or edge cases
-- Not simply restate the code in English`;
+- Not simply restate the code in English
+
+${LINK_SYNTAX}`;
 }
 
 export function fileWidePrompt(filePath: string): string {
@@ -36,5 +49,7 @@ Guidelines:
 - Skip trivial elements (simple type aliases, re-exports, single-line constants) unless they are non-obvious
 - Each annotation should be concise (1-3 sentences)
 - Explain purpose and behavior, not just restate the code
-- Note important side effects, edge cases, or design decisions`;
+- Note important side effects, edge cases, or design decisions
+
+${LINK_SYNTAX}`;
 }

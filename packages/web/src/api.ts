@@ -1,4 +1,13 @@
-import type { AnnotationFile, SemanticNode, Annotation } from "@syl/core";
+import type {
+  AnnotationFile,
+  SemanticNode,
+  Annotation,
+  LinkTarget,
+  GitRemote,
+  PullRequestSummary,
+  ReviewRun,
+} from "@syl/core";
+import type { AvailableModel } from "./components/ModelSelector";
 
 export interface FileNode {
   name: string;
@@ -82,7 +91,75 @@ export async function deleteAnnotation(
   });
 }
 
-export async function checkGenerateStatus(): Promise<{ available: boolean }> {
+export async function resolveLinks(
+  file: string,
+  refs: string[]
+): Promise<Record<string, LinkTarget | null>> {
+  if (refs.length === 0) return {};
+  const res = await fetch("/api/links/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file, refs }),
+  });
+  if (!res.ok) return {};
+  const data = await res.json();
+  return data.results ?? {};
+}
+
+// ---- Review ----
+
+export async function fetchRemotes(): Promise<{
+  remotes: GitRemote[];
+  defaults: { scout: string | null; reviewer: string | null };
+}> {
+  const res = await fetch("/api/review/remotes");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to list git remotes");
+  return data;
+}
+
+export async function fetchPullRequests(
+  repo: string
+): Promise<PullRequestSummary[]> {
+  const res = await fetch(
+    `/api/review/prs?repo=${encodeURIComponent(repo)}`
+  );
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to list pull requests");
+  return data.pullRequests ?? [];
+}
+
+export async function startReview(params: {
+  remote: string;
+  repo: string;
+  number: number;
+  scoutModel?: string;
+  reviewerModel?: string;
+}): Promise<string> {
+  const res = await fetch("/api/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to start review");
+  return data.id;
+}
+
+export async function fetchReviewRun(id: string): Promise<ReviewRun> {
+  const res = await fetch(`/api/review/${id}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load review");
+  return data.run;
+}
+
+export interface GenerateStatus {
+  available: boolean;
+  defaultModel: string | null;
+  models: AvailableModel[];
+}
+
+export async function checkGenerateStatus(): Promise<GenerateStatus> {
   const res = await fetch("/api/generate/status");
   return res.json();
 }
