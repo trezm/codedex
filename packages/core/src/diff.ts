@@ -167,6 +167,46 @@ export function parseUnifiedDiff(diff: string): DiffFile[] {
   return files;
 }
 
+/** One row of a side-by-side diff: old file on the left, new file on the right. */
+export interface DiffSplitRow {
+  left: DiffLine | null;
+  right: DiffLine | null;
+}
+
+/**
+ * Rearranges a hunk's lines into side-by-side rows. Runs of deletions and
+ * additions are paired positionally, which is what makes a rewritten line read
+ * as one row rather than two; a leftover on either side gets an empty cell.
+ */
+export function toSplitRows(lines: DiffLine[]): DiffSplitRow[] {
+  const rows: DiffSplitRow[] = [];
+  let deletes: DiffLine[] = [];
+  let adds: DiffLine[] = [];
+
+  const flush = () => {
+    const pairs = Math.max(deletes.length, adds.length);
+    for (let i = 0; i < pairs; i++) {
+      rows.push({ left: deletes[i] ?? null, right: adds[i] ?? null });
+    }
+    deletes = [];
+    adds = [];
+  };
+
+  for (const line of lines) {
+    if (line.type === "delete") {
+      deletes.push(line);
+    } else if (line.type === "add") {
+      adds.push(line);
+    } else {
+      flush();
+      rows.push({ left: line, right: line });
+    }
+  }
+  flush();
+
+  return rows;
+}
+
 /** Total added/removed lines across a parsed diff. */
 export function diffTotals(files: DiffFile[]): {
   additions: number;
