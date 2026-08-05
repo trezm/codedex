@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { ReviewCommentSide, ReviewEvent } from "@syl/core";
 import {
   listRemotes,
   listPullRequests,
@@ -6,6 +7,15 @@ import {
 } from "../review/github.js";
 import { ReviewRunner } from "../review/runner.js";
 import { defaultReviewModels, resolveModel } from "../ai/models.js";
+
+function messageFor(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/** "not found" is the only 404 the comment endpoints raise; the rest are 400s. */
+function statusFor(e: unknown): 400 | 404 {
+  return /not found/i.test(messageFor(e)) ? 404 : 400;
+}
 
 export function reviewRoutes(projectRoot: string) {
   const app = new Hono();
@@ -83,6 +93,80 @@ export function reviewRoutes(projectRoot: string) {
     const run = runner.get(c.req.param("id"));
     if (!run) return c.json({ error: "run not found" }, 404);
     return c.json({ run });
+  });
+
+  // POST /api/review/:id/comments — stage an inline comment locally
+  app.post("/:id/comments", async (c) => {
+    const body = await c.req.json<{
+      path?: string;
+      line?: number;
+      side?: ReviewCommentSide;
+      body?: string;
+      fromFinding?: string | null;
+    }>();
+
+    const line = Number(body.line);
+    if (!body.path || !Number.isInteger(line) || line <= 0) {
+      return c.json({ error: "path and a positive line are required" }, 400);
+    }
+    const side: ReviewCommentSide = body.side === "LEFT" ? "LEFT" : "RIGHT";
+
+    try {
+      const comment = runner.addComment(c.req.param("id"), {
+        path: body.path,
+        line,
+        side,
+        body: body.body ?? "",
+        fromFinding: body.fromFinding ?? null,
+      });
+      return c.json({ comment });
+    } catch (e) {
+      return c.json({ error: messageFor(e) }, statusFor(e));
+    }
+  });
+
+  // PATCH /api/review/:id/comments/:commentId — edit a staged comment
+  app.patch("/:id/comments/:commentId", async (c) => {
+    const body = await c.req.json<{ body?: string }>();
+    try {
+      const comment = runner.updateComment(
+        c.req.param("id"),
+        c.req.param("commentId"),
+        body.body ?? ""
+      );
+      return c.json({ comment });
+    } catch (e) {
+      return c.json({ error: messageFor(e) }, statusFor(e));
+    }
+  });
+
+  // DELETE /api/review/:id/comments/:commentId — discard a staged comment
+  app.delete("/:id/comments/:commentId", (c) => {
+    try {
+      runner.deleteComment(c.req.param("id"), c.req.param("commentId"));
+      return c.json({ ok: true });
+    } catch (e) {
+      return c.json({ error: messageFor(e) }, statusFor(e));
+    }
+  });
+
+  // POST /api/review/:id/submit — publish the staged comments to GitHub
+  app.post("/:id/submit", async (c) => {
+    const body = await c.req.json<{ body?: string; event?: ReviewEvent }>();
+    const event: ReviewEvent =
+      body.event === "APPROVE" || body.event === "REQUEST_CHANGES"
+        ? body.event
+        : "COMMENT";
+
+    try {
+      const submission = await runner.submit(c.req.param("id"), {
+        body: body.body ?? "",
+        event,
+      });
+      return c.json({ submission });
+    } catch (e) {
+      return c.json({ error: describeGhError(e) }, statusFor(e));
+    }
   });
 
   return app;

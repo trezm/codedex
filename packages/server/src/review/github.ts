@@ -2,6 +2,8 @@ import type {
   GitRemote,
   PullRequestSummary,
   PullRequestMeta,
+  ReviewEvent,
+  ReviewCommentSide,
 } from "@syl/core";
 import { run, CommandError } from "./exec.js";
 
@@ -123,6 +125,44 @@ export async function fetchPullRequestDiff(
   });
 }
 
+export interface SubmitReviewInput {
+  body: string;
+  event: ReviewEvent;
+  comments: { path: string; line: number; side: ReviewCommentSide; body: string }[];
+}
+
+/**
+ * Posts one GitHub review carrying every staged comment, which is what the
+ * web UI's "Submit review" button does — the same shape as reviewing on
+ * github.com, rather than a scattering of standalone comments.
+ */
+export async function submitReview(
+  repo: string,
+  number: number,
+  input: SubmitReviewInput,
+  projectRoot: string
+): Promise<{ url: string; id: number }> {
+  const payload = {
+    body: input.body,
+    event: input.event,
+    comments: input.comments.map((c) => ({
+      path: c.path,
+      line: c.line,
+      side: c.side,
+      body: c.body,
+    })),
+  };
+
+  const stdout = await run(
+    "gh",
+    ["api", `repos/${repo}/pulls/${number}/reviews`, "-X", "POST", "--input", "-"],
+    { cwd: projectRoot, input: JSON.stringify(payload) }
+  );
+
+  const result = JSON.parse(stdout) as { html_url: string; id: number };
+  return { url: result.html_url, id: result.id };
+}
+
 /** Turn raw command failures into something worth showing a user. */
 export function describeGhError(e: unknown): string {
   if (e instanceof CommandError) {
@@ -131,6 +171,12 @@ export function describeGhError(e: unknown): string {
     }
     if (/auth|logged in|authentication/i.test(e.message)) {
       return `GitHub CLI is not authenticated — run \`gh auth login\`. (${e.message})`;
+    }
+    if (/can not approve your own pull request/i.test(e.message)) {
+      return "GitHub does not allow approving your own pull request — submit as a comment instead.";
+    }
+    if (/must be part of the diff/i.test(e.message)) {
+      return `A comment was anchored to a line GitHub doesn't consider part of the diff. (${e.message})`;
     }
     return e.message;
   }

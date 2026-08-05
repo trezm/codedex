@@ -71,8 +71,22 @@ export type {
   PullRequestMeta,
   ReviewPhase,
   ReviewRun,
+  ReviewCommentSide,
+  ReviewEvent,
+  DraftComment,
+  SubmittedReview,
 } from "./review.js";
-export { SEVERITY_ORDER, severityRank, sortFindings } from "./review.js";
+export {
+  SEVERITY_ORDER,
+  severityRank,
+  sortFindings,
+  REVIEW_EVENTS,
+  findingToCommentBody,
+  commentTargetKey,
+  diffCommentTargets,
+  canCommentOn,
+  anchorForFinding,
+} from "./review.js";
 
 // Resolver
 export { resolveAnnotations } from "./annotations/resolver.js";

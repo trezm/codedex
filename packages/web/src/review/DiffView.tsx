@@ -1,6 +1,14 @@
 import { useState, Fragment } from "react";
-import type { DiffFile, DiffLine, Finding } from "@syl/core";
-import FindingCard from "./FindingCard";
+import type {
+  DiffFile,
+  DiffLine,
+  Finding,
+  DraftComment,
+  ReviewCommentSide,
+} from "@syl/core";
+import FindingCard, { type FindingAnchorState } from "./FindingCard";
+import CommentComposer from "./CommentComposer";
+import DraftCommentCard from "./DraftCommentCard";
 import { SEVERITY_DOT } from "./severity";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -22,9 +30,24 @@ function marker(type: DiffLine["type"]): string {
   return " ";
 }
 
-function Gutter({ value }: { value: number | null }) {
+function Gutter({
+  value,
+  onAdd,
+}: {
+  value: number | null;
+  onAdd?: () => void;
+}) {
   return (
-    <td className="select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80">
+    <td className="relative select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80">
+      {onAdd && (
+        <button
+          className="absolute inset-0 opacity-0 group-hover/row:opacity-100 flex items-center justify-center bg-blue-500/30 text-blue-100 hover:bg-blue-500/60 transition-opacity"
+          title="Comment on this line"
+          onClick={onAdd}
+        >
+          +
+        </button>
+      )}
       {value ?? ""}
     </td>
   );
@@ -35,14 +58,53 @@ export function findingDomId(finding: Finding, index: number): string {
   return `finding-${index}-${finding.file.replace(/[^\w]/g, "_")}-${finding.line}`;
 }
 
-interface FileDiffProps {
+/** Where a "+" on a given diff row would place a GitHub comment. */
+function commentTargetFor(
+  line: DiffLine
+): { line: number; side: ReviewCommentSide } | null {
+  if (line.newLine !== null) return { line: line.newLine, side: "RIGHT" };
+  if (line.oldLine !== null) return { line: line.oldLine, side: "LEFT" };
+  return null;
+}
+
+export interface CommentHandlers {
+  comments: DraftComment[];
+  onAddComment: (input: {
+    path: string;
+    line: number;
+    side: ReviewCommentSide;
+    body: string;
+  }) => Promise<void>;
+  onEditComment: (id: string, body: string) => Promise<void>;
+  onDeleteComment: (id: string) => Promise<void>;
+  findingAnchorState: (finding: Finding) => FindingAnchorState;
+  onAddFinding: (finding: Finding) => Promise<void>;
+}
+
+interface FileDiffProps extends CommentHandlers {
   file: DiffFile;
   findings: { finding: Finding; index: number }[];
   activeFindingId: string | null;
 }
 
-function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
+function FileDiff({
+  file,
+  findings,
+  activeFindingId,
+  comments,
+  onAddComment,
+  onEditComment,
+  onDeleteComment,
+  findingAnchorState,
+  onAddFinding,
+}: FileDiffProps) {
   const [collapsed, setCollapsed] = useState(false);
+  const [composing, setComposing] = useState<{
+    line: number;
+    side: ReviewCommentSide;
+  } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
 
   // Anchor findings to the new-file line they name; anything that doesn't land
   // on a line in the diff is shown at the top of the file instead of dropped.
@@ -64,6 +126,28 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
     }
   }
 
+  // Staged comments hang off the same rows, keyed by side so a comment on a
+  // deleted line doesn't surface against the new-file line of the same number.
+  const draftsByTarget = new Map<string, DraftComment[]>();
+  for (const comment of comments) {
+    if (comment.path !== file.path) continue;
+    const key = `${comment.side}:${comment.line}`;
+    const list = draftsByTarget.get(key) ?? [];
+    list.push(comment);
+    draftsByTarget.set(key, list);
+  }
+
+  const renderDraft = (comment: DraftComment) => (
+    <DraftCommentCard
+      key={comment.id}
+      comment={comment}
+      onEdit={(body) => onEditComment(comment.id, body)}
+      onDelete={() => onDeleteComment(comment.id)}
+    />
+  );
+
+  const fileDraftCount = comments.filter((c) => c.path === file.path).length;
+
   return (
     <div className="border border-gray-800 rounded-md overflow-hidden mb-4 bg-gray-950">
       <div className="flex items-center gap-2 px-3 py-2 bg-gray-900/70 border-b border-gray-800 sticky top-0 z-10">
@@ -79,6 +163,11 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
             ? `${file.oldPath} → ${file.path}`
             : file.path}
         </span>
+        {fileDraftCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300">
+            {fileDraftCount} pending
+          </span>
+        )}
         {findings.length > 0 && (
           <span className="flex items-center gap-1">
             {findings.map((f) => (
@@ -112,6 +201,8 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
               highlighted={
                 activeFindingId === findingDomId(entry.finding, entry.index)
               }
+              anchorState={findingAnchorState(entry.finding)}
+              onAddToReview={() => onAddFinding(entry.finding)}
             />
           ))}
 
@@ -137,11 +228,31 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
                     {hunk.lines.map((line, lineIndex) => {
                       const anchored =
                         line.newLine !== null ? byLine.get(line.newLine) : undefined;
+                      const target = commentTargetFor(line);
+                      const drafts = target
+                        ? draftsByTarget.get(`${target.side}:${target.line}`)
+                        : undefined;
+                      const isComposing =
+                        composing !== null &&
+                        target !== null &&
+                        composing.line === target.line &&
+                        composing.side === target.side;
+
                       return (
                         <Fragment key={lineIndex}>
-                          <tr className={lineClasses(line.type)}>
+                          <tr className={`group/row ${lineClasses(line.type)}`}>
                             <Gutter value={line.oldLine} />
-                            <Gutter value={line.newLine} />
+                            <Gutter
+                              value={line.newLine}
+                              onAdd={
+                                target
+                                  ? () => {
+                                      setComposeError(null);
+                                      setComposing(target);
+                                    }
+                                  : undefined
+                              }
+                            />
                             <td className="pl-2 pr-3 whitespace-pre-wrap break-all text-gray-300">
                               <span
                                 className={
@@ -157,6 +268,7 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
                               {line.text}
                             </td>
                           </tr>
+
                           {anchored?.map((entry) => (
                             <tr key={`f-${entry.index}`}>
                               <td colSpan={3} className="bg-gray-950">
@@ -167,10 +279,59 @@ function FileDiff({ file, findings, activeFindingId }: FileDiffProps) {
                                     activeFindingId ===
                                     findingDomId(entry.finding, entry.index)
                                   }
+                                  anchorState={findingAnchorState(entry.finding)}
+                                  onAddToReview={() => onAddFinding(entry.finding)}
                                 />
                               </td>
                             </tr>
                           ))}
+
+                          {drafts?.map((comment) => (
+                            <tr key={comment.id}>
+                              <td colSpan={3} className="bg-gray-950">
+                                {renderDraft(comment)}
+                              </td>
+                            </tr>
+                          ))}
+
+                          {isComposing && target && (
+                            <tr>
+                              <td colSpan={3} className="bg-gray-950">
+                                <div className="my-2 mx-3">
+                                  <CommentComposer
+                                    submitLabel="Add comment"
+                                    busy={saving}
+                                    onSubmit={async (body) => {
+                                      setSaving(true);
+                                      setComposeError(null);
+                                      try {
+                                        await onAddComment({
+                                          path: file.path,
+                                          line: target.line,
+                                          side: target.side,
+                                          body,
+                                        });
+                                        setComposing(null);
+                                      } catch (e: any) {
+                                        setComposeError(e.message);
+                                      } finally {
+                                        setSaving(false);
+                                      }
+                                    }}
+                                    onCancel={() => {
+                                      setComposing(null);
+                                      setComposeError(null);
+                                    }}
+                                  />
+                                  {composeError && (
+                                    <p className="mt-1 text-[11px] text-red-300">
+                                      {composeError}
+                                    </p>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
                         </Fragment>
                       );
                     })}
@@ -189,11 +350,12 @@ export default function DiffView({
   files,
   findings,
   activeFindingId,
+  ...handlers
 }: {
   files: DiffFile[];
   findings: Finding[];
   activeFindingId: string | null;
-}) {
+} & CommentHandlers) {
   const indexed = findings.map((finding, index) => ({ finding, index }));
   const byFile = new Map<string, { finding: Finding; index: number }[]>();
   for (const entry of indexed) {
@@ -213,6 +375,7 @@ export default function DiffView({
           file={file}
           findings={byFile.get(file.path) ?? []}
           activeFindingId={activeFindingId}
+          {...handlers}
         />
       ))}
 
@@ -230,6 +393,8 @@ export default function DiffView({
               highlighted={
                 activeFindingId === findingDomId(entry.finding, entry.index)
               }
+              anchorState={handlers.findingAnchorState(entry.finding)}
+              onAddToReview={() => handlers.onAddFinding(entry.finding)}
             />
           ))}
         </div>

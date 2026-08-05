@@ -30,8 +30,30 @@ findings anchored as inline comments on the line they refer to, plus a findings
 sidebar and the reviewer's summary.
 
 Requires the [GitHub CLI](https://cli.github.com/) on your `PATH` and
-authenticated (`gh auth login`) — it is used for `pr list`, `pr view`, and
-`pr diff`.
+authenticated (`gh auth login`) — it is used for `pr list`, `pr view`,
+`pr diff`, and posting reviews.
+
+### Posting comments back to GitHub
+
+Findings aren't read-only. Each one has an **Add to review** button that stages
+it as an inline comment pre-filled with the finding's body, and every line of
+the diff has a `+` in the gutter for writing your own. Staged comments show as
+`PENDING` at the line they'll land on and can be edited or deleted first.
+
+The **Review** bar at the bottom submits them as a *single* GitHub review —
+optional overall body, plus Comment / Request changes / Approve — which is the
+same thing as reviewing on github.com, not a scatter of standalone comments.
+
+Two things worth knowing:
+
+- GitHub only accepts inline comments on lines the diff touches. Syl checks
+  every anchor against the parsed diff before staging and refuses early, rather
+  than letting the whole submission fail. A finding that names a line outside
+  the diff is marked *Not on a diff line* and can't be staged.
+- Submitting posts publicly as your authenticated `gh` user and can't be undone
+  from Syl. The button always names the exact payload — comment count, repo and
+  PR — before you press it. Drafts live in memory with the run, so restarting
+  the server discards anything unsubmitted.
 
 Model defaults are `claude-haiku-4-5` for the scout and `claude-opus-5` for the
 reviewer, falling back to whatever is actually runnable. Both stages go through
