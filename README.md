@@ -193,6 +193,52 @@ Each file contains annotations keyed by semantic path:
 
 ## Supported Languages
 
-- TypeScript / TSX
-- JavaScript / JSX
-- Python
+Two separate things, and a file can have one without the other.
+
+**Annotations** need a tree-sitter config, because that's what turns a file into
+semantic paths. Currently TypeScript/TSX, JavaScript/JSX, Python, Rust, Go,
+Swift and Kotlin. Without one, a file opens read-only and the **Generate File**
+button is hidden — as it also is for a supported file that happens to contain no
+declarations at all, such as a barrel `index.ts` of pure re-exports.
+
+**Syntax highlighting** is independent and covers ~45 extensions, loaded on
+demand: full Lezer parsers for the languages that publish one, and
+`@codemirror/legacy-modes` for the rest (Kotlin, Swift, Ruby, Lua, shell, TOML,
+Scala, C#, …). Legacy modes are regex-based, so highlighting is coarser than a
+real parser but far better than plain text. Each grammar is a separate chunk;
+adding all of them costs ~10 kB on the main bundle rather than the ~490 kB it
+would cost to import them eagerly.
+
+Adding a language for annotations means one config under
+`packages/core/src/tree-sitter/languages/`. The grammars themselves already
+ship with `tree-sitter-wasms` (31 of them) and are served on demand, so nothing
+needs downloading — but each config has to be written against that grammar's
+real node types. They vary more than you would expect: Kotlin exposes no `name`
+field on any declaration, Swift models `struct`/`class`/`enum`/`extension` as
+one node type, and Rust `impl` blocks have `type`/`trait` instead of a name.
+
+### Node version
+
+Node 20 or 22. **Node 23+ crashes** — V8 hits a fatal `Zone` OOM while compiling
+the fourth-or-so tree-sitter grammar, at well under 100 MB RSS, taking the API
+server down with it. Node 20 and 22 load the same grammars fine. There's an
+`.nvmrc`, so `nvm use` picks the right one.
+
+### Path shapes per language
+
+Paths follow each language's own conventions, and a few carry a keyword to stay
+unambiguous:
+
+| Language | Example paths |
+| --- | --- |
+| TypeScript / JavaScript | `AnnotationStore.load`, `OPENAI_MODELS` |
+| Python | `Greeter.greet` |
+| Go | `Parser.Advance` (methods are qualified by receiver) |
+| Rust | `Parser`, `impl Parser.new`, `impl Render for Parser.render` |
+| Swift | `Parser.advance`, `extension Parser.render` |
+| Kotlin | `Parser.advance`, `Parser.Companion.make`, `Token.IDENT` |
+
+Rust `impl` blocks and Swift extensions keep their keyword because both reuse
+the name of the type they belong to. Without it, `struct Parser` and `impl
+Parser` collapse to `Parser[1]`/`Parser[2]`, where adding an impl block
+renumbers the other one and orphans its annotations.

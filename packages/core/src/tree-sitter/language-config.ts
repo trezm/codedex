@@ -1,3 +1,31 @@
+/**
+ * The slice of a tree-sitter node a language config is allowed to look at.
+ * Field lookups cover most languages, but some grammars (Kotlin) expose no
+ * `name` field at all, so child traversal has to be available too.
+ */
+export interface PathNode {
+  type: string;
+  text: string;
+  childCount: number;
+  namedChildCount: number;
+  child(index: number): PathNode | null;
+  namedChild(index: number): PathNode | null;
+  childForFieldName(name: string): PathNode | null;
+}
+
+/** First direct child matching any of `types`, in child order. */
+export function firstChildOfType(
+  node: PathNode | null | undefined,
+  ...types: string[]
+): PathNode | null {
+  if (!node) return null;
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child && types.includes(child.type)) return child;
+  }
+  return null;
+}
+
 export interface LanguagePathConfig {
   /** Language identifier (e.g. "typescript", "python") */
   id: string;
@@ -9,7 +37,7 @@ export interface LanguagePathConfig {
    * Given a path-bearing node, extract the name for the path segment.
    * Most languages use a "name" child, but some differ.
    */
-  getNodeName(node: { type: string; childForFieldName(name: string): { text: string } | null }): string | null;
+  getNodeName(node: PathNode): string | null;
   /** WASM file name for tree-sitter (e.g. "tree-sitter-typescript.wasm") */
   wasmFile: string;
 }
