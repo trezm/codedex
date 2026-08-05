@@ -4,6 +4,10 @@ import type {
   Annotation,
   LinkTarget,
   GitRemote,
+  ReviewCommentSide,
+  ReviewEvent,
+  DraftComment,
+  SubmittedReview,
   PullRequestSummary,
   ReviewRun,
 } from "@syl/core";
@@ -151,6 +155,68 @@ export async function fetchReviewRun(id: string): Promise<ReviewRun> {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to load review");
   return data.run;
+}
+
+export async function addReviewComment(
+  runId: string,
+  input: {
+    path: string;
+    line: number;
+    side: ReviewCommentSide;
+    body: string;
+    fromFinding?: string | null;
+  }
+): Promise<DraftComment> {
+  const res = await fetch(`/api/review/${runId}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to add comment");
+  return data.comment;
+}
+
+export async function updateReviewComment(
+  runId: string,
+  commentId: string,
+  body: string
+): Promise<DraftComment> {
+  const res = await fetch(`/api/review/${runId}/comments/${commentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ body }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to update comment");
+  return data.comment;
+}
+
+export async function deleteReviewComment(
+  runId: string,
+  commentId: string
+): Promise<void> {
+  const res = await fetch(`/api/review/${runId}/comments/${commentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to delete comment");
+  }
+}
+
+export async function submitReview(
+  runId: string,
+  input: { body: string; event: ReviewEvent }
+): Promise<SubmittedReview> {
+  const res = await fetch(`/api/review/${runId}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to submit review");
+  return data.submission;
 }
 
 export interface GenerateStatus {

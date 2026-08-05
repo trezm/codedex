@@ -1,8 +1,17 @@
 import { useState, Fragment } from "react";
 import { toSplitRows } from "@syl/core";
-import type { DiffFile, DiffLine, Finding, LinkTarget } from "@syl/core";
-import FindingCard from "./FindingCard";
+import type {
+  DiffFile,
+  DiffLine,
+  Finding,
+  LinkTarget,
+  DraftComment,
+  ReviewCommentSide,
+} from "@syl/core";
+import FindingCard, { type FindingAnchorState } from "./FindingCard";
 import AnnotationNote from "./AnnotationNote";
+import CommentComposer from "./CommentComposer";
+import DraftCommentCard from "./DraftCommentCard";
 import type { DiffAnnotation, DiffAnnotationData } from "./useDiffAnnotations";
 import type { ResolvedLinks } from "../components/AnnotationBody";
 import { SEVERITY_DOT } from "./severity";
@@ -37,16 +46,27 @@ function markerClass(type: DiffLine["type"]): string {
 function Gutter({
   value,
   type,
+  onAdd,
 }: {
   value: number | null;
   type?: DiffLine["type"];
+  onAdd?: () => void;
 }) {
   return (
     <td
-      className={`select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80 ${
+      className={`relative select-none text-right align-top pr-2 pl-3 w-[1%] whitespace-nowrap text-[11px] text-gray-600 border-r border-gray-800/80 ${
         type ? lineClasses(type) : ""
       }`}
     >
+      {onAdd && (
+        <button
+          className="absolute inset-0 opacity-0 group-hover/row:opacity-100 flex items-center justify-center bg-blue-500/30 text-blue-100 hover:bg-blue-500/60 transition-opacity"
+          title="Comment on this line"
+          onClick={onAdd}
+        >
+          +
+        </button>
+      )}
       {value ?? ""}
     </td>
   );
@@ -101,7 +121,41 @@ function firstLineInRange(
   return candidate !== undefined && candidate <= to ? candidate : null;
 }
 
-interface FileDiffProps {
+export interface CommentTarget {
+  line: number;
+  side: ReviewCommentSide;
+}
+
+/**
+ * Where a "+" on a unified row places a comment. New-file lines (adds and
+ * context) go on the right, deletions on the left — the side GitHub expects for
+ * code that no longer exists.
+ */
+function commentTargetFor(line: DiffLine): CommentTarget | null {
+  if (line.newLine !== null) return { line: line.newLine, side: "RIGHT" };
+  if (line.oldLine !== null) return { line: line.oldLine, side: "LEFT" };
+  return null;
+}
+
+function targetKey(target: CommentTarget): string {
+  return `${target.side}:${target.line}`;
+}
+
+export interface CommentHandlers {
+  comments: DraftComment[];
+  onAddComment: (input: {
+    path: string;
+    line: number;
+    side: ReviewCommentSide;
+    body: string;
+  }) => Promise<void>;
+  onEditComment: (id: string, body: string) => Promise<void>;
+  onDeleteComment: (id: string) => Promise<void>;
+  findingAnchorState: (finding: Finding) => FindingAnchorState;
+  onAddFinding: (finding: Finding) => Promise<void>;
+}
+
+interface FileDiffProps extends CommentHandlers {
   file: DiffFile;
   findings: { finding: Finding; index: number }[];
   annotations: DiffAnnotation[];
@@ -119,9 +173,18 @@ function FileDiff({
   activeFindingId,
   viewMode,
   onNavigate,
+  comments,
+  onAddComment,
+  onEditComment,
+  onDeleteComment,
+  findingAnchorState,
+  onAddFinding,
 }: FileDiffProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showOffDiff, setShowOffDiff] = useState(false);
+  const [composing, setComposing] = useState<CommentTarget | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [composeError, setComposeError] = useState<string | null>(null);
 
   const columns = viewMode === "split" ? 4 : 3;
 
@@ -162,12 +225,36 @@ function FileDiff({
     notesByLine.set(line, list);
   }
 
-  /** Cards that hang under a rendered line: findings first, then annotations. */
-  const anchoredRows = (newLine: number | null) => {
-    if (newLine === null) return null;
-    const findingsHere = byLine.get(newLine);
-    const notesHere = notesByLine.get(newLine);
-    if (!findingsHere && !notesHere) return null;
+  // Staged comments hang off the same rows, keyed by side so a comment on a
+  // deleted line doesn't surface against the new-file line of the same number.
+  const draftsByTarget = new Map<string, DraftComment[]>();
+  let fileDraftCount = 0;
+  for (const comment of comments) {
+    if (comment.path !== file.path) continue;
+    fileDraftCount++;
+    const key = `${comment.side}:${comment.line}`;
+    const list = draftsByTarget.get(key) ?? [];
+    list.push(comment);
+    draftsByTarget.set(key, list);
+  }
+
+  /**
+   * Cards that hang under a rendered row: findings, then annotations, then any
+   * staged comments and the open composer. `targets` is what the row can be
+   * commented on — one entry in unified mode, up to two in split.
+   */
+  const attachedRows = (newLine: number | null, targets: CommentTarget[]) => {
+    const findingsHere = newLine === null ? undefined : byLine.get(newLine);
+    const notesHere = newLine === null ? undefined : notesByLine.get(newLine);
+    const drafts = targets.flatMap((t) => draftsByTarget.get(targetKey(t)) ?? []);
+    const composeTarget = composing
+      ? targets.find((t) => targetKey(t) === targetKey(composing))
+      : undefined;
+
+    if (!findingsHere && !notesHere && drafts.length === 0 && !composeTarget) {
+      return null;
+    }
+
     return (
       <>
         {findingsHere?.map((entry) => (
@@ -179,6 +266,8 @@ function FileDiff({
                 highlighted={
                   activeFindingId === findingDomId(entry.finding, entry.index)
                 }
+                anchorState={findingAnchorState(entry.finding)}
+                onAddToReview={() => onAddFinding(entry.finding)}
               />
             </td>
           </tr>
@@ -194,8 +283,60 @@ function FileDiff({
             </td>
           </tr>
         ))}
+        {drafts.map((comment) => (
+          <tr key={comment.id}>
+            <td colSpan={columns} className="bg-gray-950">
+              <DraftCommentCard
+                comment={comment}
+                onEdit={(body) => onEditComment(comment.id, body)}
+                onDelete={() => onDeleteComment(comment.id)}
+              />
+            </td>
+          </tr>
+        ))}
+        {composeTarget && (
+          <tr>
+            <td colSpan={columns} className="bg-gray-950">
+              <div className="my-2 mx-3">
+                <CommentComposer
+                  submitLabel="Add comment"
+                  busy={saving}
+                  onSubmit={async (body) => {
+                    setSaving(true);
+                    setComposeError(null);
+                    try {
+                      await onAddComment({
+                        path: file.path,
+                        line: composeTarget.line,
+                        side: composeTarget.side,
+                        body,
+                      });
+                      setComposing(null);
+                    } catch (e: any) {
+                      setComposeError(e.message);
+                    } finally {
+                      setSaving(false);
+                    }
+                  }}
+                  onCancel={() => {
+                    setComposing(null);
+                    setComposeError(null);
+                  }}
+                />
+                {composeError && (
+                  <p className="mt-1 text-[11px] text-red-300">{composeError}</p>
+                )}
+              </div>
+            </td>
+          </tr>
+        )}
       </>
     );
+  };
+
+  const openComposer = (target: CommentTarget) => {
+    setComposeError(null);
+    setComposing(target);
   };
 
   return (
@@ -213,6 +354,11 @@ function FileDiff({
             ? `${file.oldPath} → ${file.path}`
             : file.path}
         </span>
+        {fileDraftCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-300 whitespace-nowrap">
+            {fileDraftCount} pending
+          </span>
+        )}
         {annotations.length > 0 && (
           <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 whitespace-nowrap">
             {annotations.length} syl
@@ -251,6 +397,8 @@ function FileDiff({
               highlighted={
                 activeFindingId === findingDomId(entry.finding, entry.index)
               }
+              anchorState={findingAnchorState(entry.finding)}
+              onAddToReview={() => onAddFinding(entry.finding)}
             />
           ))}
 
@@ -309,33 +457,71 @@ function FileDiff({
                       </td>
                     </tr>
                     {viewMode === "split"
-                      ? toSplitRows(hunk.lines).map((row, rowIndex) => (
-                          <Fragment key={rowIndex}>
-                            <tr>
-                              <Gutter
-                                value={row.left?.oldLine ?? null}
-                                type={row.left?.type}
-                              />
-                              <CodeCell line={row.left} divider />
-                              <Gutter
-                                value={row.right?.newLine ?? null}
-                                type={row.right?.type}
-                              />
-                              <CodeCell line={row.right} />
-                            </tr>
-                            {anchoredRows(row.right?.newLine ?? null)}
-                          </Fragment>
-                        ))
-                      : hunk.lines.map((line, lineIndex) => (
-                          <Fragment key={lineIndex}>
-                            <tr>
-                              <Gutter value={line.oldLine} type={line.type} />
-                              <Gutter value={line.newLine} type={line.type} />
-                              <CodeCell line={line} />
-                            </tr>
-                            {anchoredRows(line.newLine)}
-                          </Fragment>
-                        ))}
+                      ? toSplitRows(hunk.lines).map((row, rowIndex) => {
+                          // A context line is the same object on both sides, so
+                          // only offer the left "+" for genuine deletions —
+                          // otherwise one line would get two competing targets.
+                          const leftTarget: CommentTarget | null =
+                            row.left && row.left.type === "delete" && row.left.oldLine !== null
+                              ? { line: row.left.oldLine, side: "LEFT" }
+                              : null;
+                          const rightTarget: CommentTarget | null =
+                            row.right && row.right.newLine !== null
+                              ? { line: row.right.newLine, side: "RIGHT" }
+                              : null;
+                          const targets = [leftTarget, rightTarget].filter(
+                            (t): t is CommentTarget => t !== null
+                          );
+
+                          return (
+                            <Fragment key={rowIndex}>
+                              <tr className="group/row">
+                                <Gutter
+                                  value={row.left?.oldLine ?? null}
+                                  type={row.left?.type}
+                                  onAdd={
+                                    leftTarget
+                                      ? () => openComposer(leftTarget)
+                                      : undefined
+                                  }
+                                />
+                                <CodeCell line={row.left} divider />
+                                <Gutter
+                                  value={row.right?.newLine ?? null}
+                                  type={row.right?.type}
+                                  onAdd={
+                                    rightTarget
+                                      ? () => openComposer(rightTarget)
+                                      : undefined
+                                  }
+                                />
+                                <CodeCell line={row.right} />
+                              </tr>
+                              {attachedRows(row.right?.newLine ?? null, targets)}
+                            </Fragment>
+                          );
+                        })
+                      : hunk.lines.map((line, lineIndex) => {
+                          const target = commentTargetFor(line);
+                          return (
+                            <Fragment key={lineIndex}>
+                              <tr className="group/row">
+                                <Gutter value={line.oldLine} type={line.type} />
+                                <Gutter
+                                  value={line.newLine}
+                                  type={line.type}
+                                  onAdd={
+                                    target
+                                      ? () => openComposer(target)
+                                      : undefined
+                                  }
+                                />
+                                <CodeCell line={line} />
+                              </tr>
+                              {attachedRows(line.newLine, target ? [target] : [])}
+                            </Fragment>
+                          );
+                        })}
                   </Fragment>
                 ))}
               </tbody>
@@ -354,6 +540,7 @@ export default function DiffView({
   viewMode,
   annotationData,
   onNavigate,
+  ...handlers
 }: {
   files: DiffFile[];
   findings: Finding[];
@@ -361,7 +548,7 @@ export default function DiffView({
   viewMode: DiffViewMode;
   annotationData: DiffAnnotationData;
   onNavigate?: (target: LinkTarget) => void;
-}) {
+} & CommentHandlers) {
   const indexed = findings.map((finding, index) => ({ finding, index }));
   const byFile = new Map<string, { finding: Finding; index: number }[]>();
   for (const entry of indexed) {
@@ -385,6 +572,7 @@ export default function DiffView({
           activeFindingId={activeFindingId}
           viewMode={viewMode}
           onNavigate={onNavigate}
+          {...handlers}
         />
       ))}
 
@@ -402,6 +590,8 @@ export default function DiffView({
               highlighted={
                 activeFindingId === findingDomId(entry.finding, entry.index)
               }
+              anchorState={handlers.findingAnchorState(entry.finding)}
+              onAddToReview={() => handlers.onAddFinding(entry.finding)}
             />
           ))}
         </div>

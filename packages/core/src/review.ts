@@ -1,3 +1,5 @@
+import type { DiffFile } from "./diff.js";
+
 export type FindingSeverity = "critical" | "high" | "medium" | "low";
 
 export type FindingCategory =
@@ -65,6 +67,49 @@ export interface PullRequestMeta {
   url: string;
 }
 
+/** GitHub anchors inline comments to a side of the diff: the new file or the old. */
+export type ReviewCommentSide = "RIGHT" | "LEFT";
+
+export type ReviewEvent = "COMMENT" | "APPROVE" | "REQUEST_CHANGES";
+
+export interface DraftComment {
+  id: string;
+  path: string;
+  /** Line number within the file on `side`. Must be a line the diff touches. */
+  line: number;
+  side: ReviewCommentSide;
+  body: string;
+  /** Title of the finding this came from, or null when hand-written. */
+  fromFinding: string | null;
+  createdAt: string;
+}
+
+export interface SubmittedReview {
+  url: string;
+  event: ReviewEvent;
+  commentCount: number;
+  submittedAt: string;
+}
+
+export const REVIEW_EVENTS: { value: ReviewEvent; label: string; hint: string }[] =
+  [
+    {
+      value: "COMMENT",
+      label: "Comment",
+      hint: "Submit general feedback without explicit approval.",
+    },
+    {
+      value: "REQUEST_CHANGES",
+      label: "Request changes",
+      hint: "Submit feedback that must be addressed before merging.",
+    },
+    {
+      value: "APPROVE",
+      label: "Approve",
+      hint: "Submit feedback and approve merging these changes.",
+    },
+  ];
+
 export type ReviewPhase =
   | "fetching"
   | "scout"
@@ -93,6 +138,10 @@ export interface ReviewRun {
   diff: string | null;
   /** Set when the diff was too large to send to the models in full. */
   diffTruncated: boolean;
+  /** Comments staged locally, not yet sent to GitHub. */
+  comments: DraftComment[];
+  /** Reviews already posted from this run, newest last. */
+  submissions: SubmittedReview[];
 }
 
 export const SEVERITY_ORDER: FindingSeverity[] = [
@@ -114,4 +163,72 @@ export function sortFindings(findings: Finding[]): Finding[] {
     if (a.file !== b.file) return a.file.localeCompare(b.file);
     return a.line - b.line;
   });
+}
+
+/** Pre-fills a review comment from a finding, in GitHub-flavoured markdown. */
+export function findingToCommentBody(finding: Finding): string {
+  const parts = [
+    `**${finding.severity.toUpperCase()} · ${finding.category}** — ${finding.title}`,
+    "",
+    finding.description,
+  ];
+  if (finding.suggestion) {
+    parts.push("", "**Suggestion**", "", finding.suggestion);
+  }
+  return parts.join("\n").trim();
+}
+
+export function commentTargetKey(
+  side: ReviewCommentSide,
+  line: number
+): string {
+  return `${side}:${line}`;
+}
+
+/**
+ * The (side, line) pairs GitHub will accept an inline comment on — i.e. lines
+ * the diff actually touches. Posting outside this set is rejected by the API,
+ * so both the UI and the server check against it first.
+ */
+export function diffCommentTargets(files: DiffFile[]): Map<string, Set<string>> {
+  const targets = new Map<string, Set<string>>();
+  for (const file of files) {
+    const keys = new Set<string>();
+    for (const hunk of file.hunks) {
+      for (const line of hunk.lines) {
+        if (line.newLine !== null) {
+          keys.add(commentTargetKey("RIGHT", line.newLine));
+        }
+        if (line.oldLine !== null) {
+          keys.add(commentTargetKey("LEFT", line.oldLine));
+        }
+      }
+    }
+    targets.set(file.path, keys);
+  }
+  return targets;
+}
+
+export function canCommentOn(
+  targets: Map<string, Set<string>>,
+  path: string,
+  line: number,
+  side: ReviewCommentSide
+): boolean {
+  return targets.get(path)?.has(commentTargetKey(side, line)) ?? false;
+}
+
+/**
+ * Where a finding's comment should hang. Findings name a line in the new file,
+ * so they anchor to the RIGHT side; one that isn't in the diff can't be posted
+ * inline and returns null.
+ */
+export function anchorForFinding(
+  targets: Map<string, Set<string>>,
+  finding: Finding
+): { path: string; line: number; side: ReviewCommentSide } | null {
+  if (canCommentOn(targets, finding.file, finding.line, "RIGHT")) {
+    return { path: finding.file, line: finding.line, side: "RIGHT" };
+  }
+  return null;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { LinkTarget, ReviewRun, ReviewPhase } from "@syl/core";
 import ReviewSetup from "./ReviewSetup";
 import ReviewResult from "./ReviewResult";
@@ -111,6 +111,12 @@ export default function ReviewView({
     };
   }, [runId]);
 
+  // Polling stops once a run is done, so comment edits refresh on demand.
+  const refresh = useCallback(async () => {
+    if (!runId) return;
+    setRun(await fetchReviewRun(runId));
+  }, [runId]);
+
   const handleStart = async (params: {
     remote: string;
     repo: string;
@@ -195,6 +201,11 @@ export default function ReviewView({
   }
 
   return (
-    <ReviewResult run={run} onNewReview={reset} onNavigate={onNavigate} />
+    <ReviewResult
+      run={run}
+      onNewReview={reset}
+      onNavigate={onNavigate}
+      onRefresh={refresh}
+    />
   );
 }

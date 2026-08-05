@@ -1,13 +1,29 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   parseUnifiedDiff,
   diffTotals,
   sortFindings,
+  diffCommentTargets,
+  anchorForFinding,
+  findingToCommentBody,
   type LinkTarget,
   type ReviewRun,
+  type Finding,
 } from "@syl/core";
-import DiffView, { findingDomId, type DiffViewMode } from "./DiffView";
+import DiffView, {
+  findingDomId,
+  type DiffViewMode,
+  type CommentHandlers,
+} from "./DiffView";
+import type { FindingAnchorState } from "./FindingCard";
+import SubmitReviewPanel from "./SubmitReviewPanel";
 import { useDiffAnnotations } from "./useDiffAnnotations";
+import {
+  addReviewComment,
+  updateReviewComment,
+  deleteReviewComment,
+  submitReview,
+} from "../api";
 import { SEVERITY_STYLE, SEVERITY_DOT, RISK_STYLE } from "./severity";
 
 const VIEW_MODE_KEY = "syl-diff-view-mode";
@@ -16,10 +32,12 @@ export default function ReviewResult({
   run,
   onNewReview,
   onNavigate,
+  onRefresh,
 }: {
   run: ReviewRun;
   onNewReview: () => void;
   onNavigate?: (target: LinkTarget) => void;
+  onRefresh: () => Promise<void>;
 }) {
   const [activeFindingId, setActiveFindingId] = useState<string | null>(null);
   const [showScout, setShowScout] = useState(false);
@@ -60,6 +78,85 @@ export default function ReviewResult({
       ),
     [annotationData]
   );
+
+  const commentTargets = useMemo(() => diffCommentTargets(files), [files]);
+
+  // A finding is "staged" when a comment already exists at its anchor, so the
+  // same finding can't be queued twice.
+  const findingAnchorState = useCallback(
+    (finding: Finding): FindingAnchorState => {
+      const anchor = anchorForFinding(commentTargets, finding);
+      if (!anchor) return "unanchored";
+      const staged = run.comments.some(
+        (c) =>
+          c.path === anchor.path &&
+          c.line === anchor.line &&
+          c.side === anchor.side &&
+          c.fromFinding === finding.title
+      );
+      return staged ? "staged" : "ready";
+    },
+    [commentTargets, run.comments]
+  );
+
+  const commentHandlers: CommentHandlers = {
+    comments: run.comments,
+    findingAnchorState,
+    onAddComment: async (input) => {
+      await addReviewComment(run.id, input);
+      await onRefresh();
+    },
+    onEditComment: async (id, body) => {
+      await updateReviewComment(run.id, id, body);
+      await onRefresh();
+    },
+    onDeleteComment: async (id) => {
+      await deleteReviewComment(run.id, id);
+      await onRefresh();
+    },
+    onAddFinding: async (finding) => {
+      const anchor = anchorForFinding(commentTargets, finding);
+      if (!anchor) throw new Error("This finding isn't on a line in the diff.");
+      await addReviewComment(run.id, {
+        ...anchor,
+        body: findingToCommentBody(finding),
+        fromFinding: finding.title,
+      });
+      await onRefresh();
+    },
+  };
+
+  const readyFindings = useMemo(
+    () => findings.filter((f) => findingAnchorState(f) === "ready"),
+    [findings, findingAnchorState]
+  );
+
+  const [addingAll, setAddingAll] = useState(false);
+  const [addAllError, setAddAllError] = useState<string | null>(null);
+
+  const addAll = async () => {
+    setAddingAll(true);
+    setAddAllError(null);
+    try {
+      // Sequential on purpose: the run's comment list is mutated server-side,
+      // and concurrent posts would race on it.
+      for (const finding of readyFindings) {
+        const anchor = anchorForFinding(commentTargets, finding);
+        if (!anchor) continue;
+        await addReviewComment(run.id, {
+          ...anchor,
+          body: findingToCommentBody(finding),
+          fromFinding: finding.title,
+        });
+      }
+      await onRefresh();
+    } catch (e: any) {
+      setAddAllError(e.message);
+      await onRefresh();
+    } finally {
+      setAddingAll(false);
+    }
+  };
 
   const diffPaneRef = useRef<HTMLElement>(null);
 
@@ -215,9 +312,24 @@ export default function ReviewResult({
             </div>
           )}
 
-          <div className="px-4 py-2 text-xs uppercase tracking-wide text-gray-500 border-b border-gray-800">
-            {findings.length} finding{findings.length === 1 ? "" : "s"}
+          <div className="px-4 py-2 text-xs uppercase tracking-wide text-gray-500 border-b border-gray-800 flex items-center gap-2">
+            <span>
+              {findings.length} finding{findings.length === 1 ? "" : "s"}
+            </span>
+            {readyFindings.length > 0 && (
+              <button
+                className="ml-auto normal-case text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 text-blue-300 hover:bg-blue-500/10 disabled:opacity-40"
+                disabled={addingAll}
+                title="Stage a comment for every finding that lands on a diff line"
+                onClick={addAll}
+              >
+                {addingAll ? "Adding…" : `Add ${readyFindings.length} to review`}
+              </button>
+            )}
           </div>
+          {addAllError && (
+            <div className="px-4 py-2 text-[11px] text-red-300">{addAllError}</div>
+          )}
 
           {findings.length === 0 ? (
             <div className="px-4 py-6 text-sm text-gray-500">
@@ -278,10 +390,19 @@ export default function ReviewResult({
               viewMode={viewMode}
               annotationData={annotationData}
               onNavigate={onNavigate}
+              {...commentHandlers}
             />
           )}
         </main>
       </div>
+
+      <SubmitReviewPanel
+        run={run}
+        onSubmit={async (input) => {
+          await submitReview(run.id, input);
+          await onRefresh();
+        }}
+      />
     </div>
   );
 }
