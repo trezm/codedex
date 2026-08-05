@@ -54,8 +54,9 @@ export type {
   DiffHunk,
   DiffFile,
   DiffFileStatus,
+  DiffSplitRow,
 } from "./diff.js";
-export { parseUnifiedDiff, diffTotals } from "./diff.js";
+export { parseUnifiedDiff, diffTotals, toSplitRows } from "./diff.js";
 
 // Review
 export type {

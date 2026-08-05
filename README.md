@@ -27,7 +27,18 @@ high-confidence findings.
 Syl reads the git remotes of whatever project it is pointed at, you pick a remote
 and a PR number, and the result opens as a GitHub-style review page: the diff with
 findings anchored as inline comments on the line they refer to, plus a findings
-sidebar and the reviewer's summary.
+sidebar and the reviewer's summary. The diff renders **unified or side-by-side** —
+the toggle sits next to "New review" and is remembered between reviews.
+
+Your own annotations show up in that diff too. For every file the pull request
+touches, Syl resolves the annotations in `.syl/` and drops them inline, anchored
+to the first line of the annotated node the diff actually shows — so a note on a
+function appears next to the changed line inside it. Annotations whose node isn't
+in the diff at all are collapsed behind a per-file toggle, and links inside them
+jump to the annotate tab. Annotations live in your working copy rather than in
+the pull request, so this is best-effort: a file your checkout doesn't have (or a
+symbol that has since moved) simply contributes nothing. Editing stays in the
+annotate tab — the review diff shows them read-only.
 
 Requires the [GitHub CLI](https://cli.github.com/) on your `PATH` and
 authenticated (`gh auth login`) — it is used for `pr list`, `pr view`,
@@ -39,6 +50,10 @@ Findings aren't read-only. Each one has an **Add to review** button that stages
 it as an inline comment pre-filled with the finding's body, and every line of
 the diff has a `+` in the gutter for writing your own. Staged comments show as
 `PENDING` at the line they'll land on and can be edited or deleted first.
+
+This works in both view modes. In side-by-side, the left gutter comments on
+deleted lines and the right on added or unchanged ones, matching the side
+GitHub files them under.
 
 The **Review** bar at the bottom submits them as a *single* GitHub review —
 optional overall body, plus Comment / Request changes / Approve — which is the

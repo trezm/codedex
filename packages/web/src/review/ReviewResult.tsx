@@ -6,12 +6,18 @@ import {
   diffCommentTargets,
   anchorForFinding,
   findingToCommentBody,
+  type LinkTarget,
   type ReviewRun,
   type Finding,
 } from "@syl/core";
-import DiffView, { findingDomId, type CommentHandlers } from "./DiffView";
+import DiffView, {
+  findingDomId,
+  type DiffViewMode,
+  type CommentHandlers,
+} from "./DiffView";
 import type { FindingAnchorState } from "./FindingCard";
 import SubmitReviewPanel from "./SubmitReviewPanel";
+import { useDiffAnnotations } from "./useDiffAnnotations";
 import {
   addReviewComment,
   updateReviewComment,
@@ -20,17 +26,39 @@ import {
 } from "../api";
 import { SEVERITY_STYLE, SEVERITY_DOT, RISK_STYLE } from "./severity";
 
+const VIEW_MODE_KEY = "syl-diff-view-mode";
+
 export default function ReviewResult({
   run,
   onNewReview,
+  onNavigate,
   onRefresh,
 }: {
   run: ReviewRun;
   onNewReview: () => void;
+  onNavigate?: (target: LinkTarget) => void;
   onRefresh: () => Promise<void>;
 }) {
   const [activeFindingId, setActiveFindingId] = useState<string | null>(null);
   const [showScout, setShowScout] = useState(false);
+  const [viewMode, setViewMode] = useState<DiffViewMode>(() => {
+    try {
+      return localStorage.getItem(VIEW_MODE_KEY) === "split"
+        ? "split"
+        : "unified";
+    } catch {
+      return "unified";
+    }
+  });
+
+  const chooseViewMode = (mode: DiffViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  };
 
   const files = useMemo(
     () => (run.diff ? parseUnifiedDiff(run.diff) : []),
@@ -40,6 +68,15 @@ export default function ReviewResult({
   const findings = useMemo(
     () => sortFindings(run.review?.findings ?? []),
     [run.review]
+  );
+  const annotationData = useDiffAnnotations(files);
+  const annotationCount = useMemo(
+    () =>
+      Object.values(annotationData.byFile).reduce(
+        (total, entries) => total + entries.length,
+        0
+      ),
+    [annotationData]
   );
 
   const commentTargets = useMemo(() => diffCommentTargets(files), [files]);
@@ -164,12 +201,34 @@ export default function ReviewResult({
               view on GitHub ↗
             </a>
           )}
-          <button
-            className="ml-auto text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
-            onClick={onNewReview}
-          >
-            New review
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex items-center rounded border border-gray-700 overflow-hidden">
+              {(
+                [
+                  ["unified", "Unified"],
+                  ["split", "Split"],
+                ] as [DiffViewMode, string][]
+              ).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  className={`text-xs px-2 py-1 ${
+                    viewMode === mode
+                      ? "bg-gray-800 text-gray-100"
+                      : "text-gray-500 hover:text-gray-300"
+                  }`}
+                  onClick={() => chooseViewMode(mode)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+              onClick={onNewReview}
+            >
+              New review
+            </button>
+          </div>
         </div>
         <div className="mt-1 text-xs text-gray-500 flex items-center gap-3 flex-wrap">
           <span className="font-mono">{run.repo}</span>
@@ -185,6 +244,12 @@ export default function ReviewResult({
             <span className="text-emerald-400">+{totals.additions}</span>{" "}
             <span className="text-red-400">−{totals.deletions}</span>
           </span>
+          {annotationCount > 0 && (
+            <span className="text-violet-300/80">
+              {annotationCount} syl annotation
+              {annotationCount === 1 ? "" : "s"} on these files
+            </span>
+          )}
           <span className="text-gray-600">
             scout {run.scoutModel}
             {run.scoutBackend && ` (${run.scoutBackend})`} · reviewer{" "}
@@ -322,6 +387,9 @@ export default function ReviewResult({
               files={files}
               findings={findings}
               activeFindingId={activeFindingId}
+              viewMode={viewMode}
+              annotationData={annotationData}
+              onNavigate={onNavigate}
               {...commentHandlers}
             />
           )}

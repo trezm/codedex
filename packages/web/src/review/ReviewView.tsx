@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ReviewRun, ReviewPhase } from "@syl/core";
+import type { LinkTarget, ReviewRun, ReviewPhase } from "@syl/core";
 import ReviewSetup from "./ReviewSetup";
 import ReviewResult from "./ReviewResult";
 import { startReview, fetchReviewRun } from "../api";
@@ -60,7 +60,12 @@ function Progress({ run }: { run: ReviewRun }) {
 
 const LAST_RUN_KEY = "syl-last-review-run";
 
-export default function ReviewView() {
+export default function ReviewView({
+  onNavigate,
+}: {
+  /** Follows a link inside an annotation shown in the diff, over in the annotate tab. */
+  onNavigate?: (target: LinkTarget) => void;
+}) {
   // Runs live on the server, so a reload can pick the last one back up.
   const [runId, setRunId] = useState<string | null>(() => {
     try {
@@ -195,5 +200,12 @@ export default function ReviewView() {
     );
   }
 
-  return <ReviewResult run={run} onNewReview={reset} onRefresh={refresh} />;
+  return (
+    <ReviewResult
+      run={run}
+      onNewReview={reset}
+      onNavigate={onNavigate}
+      onRefresh={refresh}
+    />
+  );
 }
