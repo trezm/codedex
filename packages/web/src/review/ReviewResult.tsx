@@ -28,14 +28,31 @@ import { SEVERITY_STYLE, SEVERITY_DOT, RISK_STYLE } from "./severity";
 
 const VIEW_MODE_KEY = "syl-diff-view-mode";
 
+/** Absolute, not relative — a cached review can be arbitrarily old. */
+function formatWhen(iso: string): string {
+  const date = new Date(iso);
+  const sameDay = new Date().toDateString() === date.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
+}
+
 export default function ReviewResult({
   run,
   onNewReview,
+  onRerun,
   onNavigate,
   onRefresh,
 }: {
   run: ReviewRun;
   onNewReview: () => void;
+  /** Reviews this PR again, ignoring the cached result. */
+  onRerun: () => void;
   onNavigate?: (target: LinkTarget) => void;
   onRefresh: () => Promise<void>;
 }) {
@@ -256,6 +273,23 @@ export default function ReviewResult({
             {run.reviewerModel}
             {run.reviewerBackend && ` (${run.reviewerBackend})`}
           </span>
+          {run.reusedFrom && (
+            <span className="flex items-center gap-1.5 text-gray-400">
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-600 bg-gray-800/60"
+                title="The diff, the pull request and the models were unchanged, so syl reused the stored findings instead of calling the models again."
+              >
+                cached
+              </span>
+              <span>from {formatWhen(run.reusedFrom.startedAt)}</span>
+              <button
+                className="text-blue-400 hover:underline"
+                onClick={onRerun}
+              >
+                re-run
+              </button>
+            </span>
+          )}
         </div>
         {run.diffTruncated && (
           <div className="mt-2 text-xs text-amber-300">

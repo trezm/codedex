@@ -117,27 +117,42 @@ export default function ReviewView({
     setRun(await fetchReviewRun(runId));
   }, [runId]);
 
+  const remember = (id: string) => {
+    setRun(null);
+    setRunId(id);
+    try {
+      localStorage.setItem(LAST_RUN_KEY, id);
+    } catch {
+      // ignore
+    }
+  };
+
   const handleStart = async (params: {
     remote: string;
     repo: string;
     number: number;
+    refresh?: boolean;
   }) => {
     setStarting(true);
     setError(null);
     try {
-      const id = await startReview(params);
-      setRun(null);
-      setRunId(id);
-      try {
-        localStorage.setItem(LAST_RUN_KEY, id);
-      } catch {
-        // ignore
-      }
+      remember(await startReview(params));
     } catch (e: any) {
       setError(e.message);
     } finally {
       setStarting(false);
     }
+  };
+
+  /** "Re-run" on a review that came back from the cache. */
+  const rerun = () => {
+    if (!run) return;
+    void handleStart({
+      remote: run.remote,
+      repo: run.repo,
+      number: run.number,
+      refresh: true,
+    });
   };
 
   const reset = () => {
@@ -170,7 +185,11 @@ export default function ReviewView({
   if (!runId || !run) {
     return (
       <div className="flex-1 overflow-y-auto">
-        <ReviewSetup onStart={handleStart} busy={starting} />
+        <ReviewSetup
+          onStart={handleStart}
+          onOpenRun={remember}
+          busy={starting}
+        />
       </div>
     );
   }
@@ -204,6 +223,7 @@ export default function ReviewView({
     <ReviewResult
       run={run}
       onNewReview={reset}
+      onRerun={rerun}
       onNavigate={onNavigate}
       onRefresh={refresh}
     />

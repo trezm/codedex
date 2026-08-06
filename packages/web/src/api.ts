@@ -10,6 +10,7 @@ import type {
   SubmittedReview,
   PullRequestSummary,
   ReviewRun,
+  ReviewRunSummary,
 } from "@syl/core";
 import type { AvailableModel } from "./components/ModelSelector";
 
@@ -139,6 +140,8 @@ export async function startReview(params: {
   number: number;
   scoutModel?: string;
   reviewerModel?: string;
+  /** Skip the local cache and pay for the models again. */
+  refresh?: boolean;
 }): Promise<string> {
   const res = await fetch("/api/review", {
     method: "POST",
@@ -148,6 +151,14 @@ export async function startReview(params: {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to start review");
   return data.id;
+}
+
+/** Past runs from the server's local cache — survives a restart. */
+export async function fetchReviewRuns(): Promise<ReviewRunSummary[]> {
+  const res = await fetch("/api/review/runs");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load past reviews");
+  return data.runs ?? [];
 }
 
 export async function fetchReviewRun(id: string): Promise<ReviewRun> {
