@@ -1,4 +1,4 @@
-import { useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { toSplitRows } from "@syl/core";
 import type {
   DiffFile,
@@ -162,6 +162,7 @@ interface FileDiffProps extends CommentHandlers {
   links: ResolvedLinks;
   activeFindingId: string | null;
   viewMode: DiffViewMode;
+  notesCollapsed: boolean;
   onNavigate?: (target: LinkTarget) => void;
 }
 
@@ -172,6 +173,7 @@ function FileDiff({
   links,
   activeFindingId,
   viewMode,
+  notesCollapsed,
   onNavigate,
   comments,
   onAddComment,
@@ -182,6 +184,10 @@ function FileDiff({
 }: FileDiffProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [showOffDiff, setShowOffDiff] = useState(false);
+  // Seeded from the review-wide setting, then owned by this file until that
+  // setting changes again — so one noisy file can be quietened on its own.
+  const [notesFolded, setNotesFolded] = useState(notesCollapsed);
+  useEffect(() => setNotesFolded(notesCollapsed), [notesCollapsed]);
   const [composing, setComposing] = useState<CommentTarget | null>(null);
   const [saving, setSaving] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
@@ -278,6 +284,7 @@ function FileDiff({
               <AnnotationNote
                 entry={entry}
                 links={links}
+                defaultCollapsed={notesFolded}
                 onNavigate={onNavigate}
               />
             </td>
@@ -360,9 +367,18 @@ function FileDiff({
           </span>
         )}
         {annotations.length > 0 && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 whitespace-nowrap">
-            {annotations.length} syl
-          </span>
+          <button
+            className="text-[10px] px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20 whitespace-nowrap"
+            title={
+              notesFolded
+                ? "Expand this file's syl annotations"
+                : "Collapse this file's syl annotations"
+            }
+            aria-expanded={!notesFolded}
+            onClick={() => setNotesFolded((f) => !f)}
+          >
+            {notesFolded ? "▸" : "▾"} {annotations.length} syl
+          </button>
         )}
         {findings.length > 0 && (
           <span className="flex items-center gap-1">
@@ -417,6 +433,7 @@ function FileDiff({
                     key={entry.path}
                     entry={entry}
                     links={links}
+                    defaultCollapsed={notesFolded}
                     onNavigate={onNavigate}
                   />
                 ))}
@@ -539,6 +556,7 @@ export default function DiffView({
   activeFindingId,
   viewMode,
   annotationData,
+  notesCollapsed,
   onNavigate,
   ...handlers
 }: {
@@ -547,6 +565,7 @@ export default function DiffView({
   activeFindingId: string | null;
   viewMode: DiffViewMode;
   annotationData: DiffAnnotationData;
+  notesCollapsed: boolean;
   onNavigate?: (target: LinkTarget) => void;
 } & CommentHandlers) {
   const indexed = findings.map((finding, index) => ({ finding, index }));
@@ -571,6 +590,7 @@ export default function DiffView({
           links={annotationData.linksByFile[file.path] ?? {}}
           activeFindingId={activeFindingId}
           viewMode={viewMode}
+          notesCollapsed={notesCollapsed}
           onNavigate={onNavigate}
           {...handlers}
         />
