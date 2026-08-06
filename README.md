@@ -67,14 +67,39 @@ Two things worth knowing:
   the diff is marked *Not on a diff line* and can't be staged.
 - Submitting posts publicly as your authenticated `gh` user and can't be undone
   from Syl. The button always names the exact payload — comment count, repo and
-  PR — before you press it. Drafts live in memory with the run, so restarting
-  the server discards anything unsubmitted.
+  PR — before you press it. Drafts are saved with the run, so a server restart
+  no longer discards anything unsubmitted.
 
 Model defaults are `claude-haiku-4-5` for the scout and `claude-opus-5` for the
 reviewer, falling back to whatever is actually runnable. Both stages go through
 the `claude`/`codex` CLI when available, so a review costs subscription usage
-rather than API tokens. Runs are held in memory, so restarting the server clears
-them.
+rather than API tokens.
+
+### Cached locally
+
+Reviews are expensive, and re-reviewing an unchanged pull request produces the
+same findings twice. So every run is written to a small SQLite database at
+`.syl/cache/reviews.db` (override with `SYL_REVIEW_DB`), and reviewing a PR
+whose inputs match a stored run skips the models entirely and reuses it.
+
+"Inputs" is the whole prompt, hashed: the diff, the PR title, description and
+branches, both model ids, and the prompt text itself. Push a commit, retitle the
+PR, pick a different reviewer model or edit a prompt in `review/prompts.ts`, and
+the next review is a miss and runs for real. A reused review is labelled
+**cached** in the header with the date of the run it came from, next to a
+**re-run** link; **Ignore cached result** on the setup screen does the same
+thing up front.
+
+Two other things fall out of it. Past runs are listed on the setup screen and
+reopen without touching GitHub, and everything attached to a run — the diff, the
+findings, staged comments, submitted reviews — survives a restart. The 200 most
+recent runs are kept; older ones are dropped.
+
+The cache is disposable: delete the file, or let it be discarded automatically
+when the schema changes. The directory ignores itself, so it stays out of git
+even though the rest of `.syl/` is meant to be committed. It needs the built-in
+`node:sqlite`, which means Node 22.5 or newer — on older Node, syl logs a
+warning at startup and keeps runs in memory as before.
 
 ## Links in Annotations
 
