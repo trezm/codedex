@@ -45,13 +45,14 @@ function formatWhen(iso: string): string {
 
 export default function ReviewResult({
   run,
-  onNewReview,
+  onBack,
   onRerun,
   onNavigate,
   onRefresh,
 }: {
   run: ReviewRun;
-  onNewReview: () => void;
+  /** Leaves this run for the setup page, which lists past reviews. */
+  onBack: () => void;
   /** Reviews this PR again, ignoring the cached result. */
   onRerun: () => void;
   onNavigate?: (target: LinkTarget) => void;
@@ -223,6 +224,13 @@ export default function ReviewResult({
       {/* PR header */}
       <div className="border-b border-gray-800 px-5 py-3 bg-gray-950">
         <div className="flex items-baseline gap-2 flex-wrap">
+          <button
+            className="self-center flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+            title="Back to the review list and your past reviews"
+            onClick={onBack}
+          >
+            <span aria-hidden="true">←</span> Reviews
+          </button>
           <h2 className="text-base text-gray-100 font-medium">
             {meta?.title ?? `Pull request #${run.number}`}
           </h2>
@@ -258,12 +266,6 @@ export default function ReviewResult({
                 </button>
               ))}
             </div>
-            <button
-              className="text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
-              onClick={onNewReview}
-            >
-              New review
-            </button>
           </div>
         </div>
         <div className="mt-1 text-xs text-gray-500 flex items-center gap-3 flex-wrap">
