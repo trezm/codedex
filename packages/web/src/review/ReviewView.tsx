@@ -14,10 +14,26 @@ const PHASE_LABEL: Record<ReviewPhase, string> = {
 
 const PHASE_ORDER: ReviewPhase[] = ["fetching", "scout", "reviewer", "done"];
 
-function Progress({ run }: { run: ReviewRun }) {
+/** Top-left way out of a run, back to the setup page and its past-review list. */
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
+      title="Back to the review list and your past reviews"
+      onClick={onClick}
+    >
+      <span aria-hidden="true">←</span> Reviews
+    </button>
+  );
+}
+
+function Progress({ run, onBack }: { run: ReviewRun; onBack: () => void }) {
   const currentIndex = PHASE_ORDER.indexOf(run.phase);
   return (
     <div className="max-w-2xl mx-auto py-16 px-6">
+      <div className="mb-4">
+        <BackButton onClick={onBack} />
+      </div>
       <h2 className="text-lg font-semibold text-gray-200">
         Reviewing {run.repo} #{run.number}
       </h2>
@@ -52,7 +68,8 @@ function Progress({ run }: { run: ReviewRun }) {
         })}
       </ol>
       <p className="mt-6 text-xs text-gray-600">
-        The reviewer pass on a large diff can take a couple of minutes.
+        The reviewer pass on a large diff can take a couple of minutes. Going
+        back doesn't cancel it — the run keeps going and stays in your history.
       </p>
     </div>
   );
@@ -169,15 +186,12 @@ export default function ReviewView({
   if (error && !run) {
     return (
       <div className="max-w-2xl mx-auto py-16 px-6">
+        <div className="mb-4">
+          <BackButton onClick={reset} />
+        </div>
         <div className="text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded px-3 py-2">
           {error}
         </div>
-        <button
-          className="mt-4 text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
-          onClick={reset}
-        >
-          Back
-        </button>
       </div>
     );
   }
@@ -197,16 +211,13 @@ export default function ReviewView({
   if (run.phase === "failed") {
     return (
       <div className="max-w-2xl mx-auto py-16 px-6">
+        <div className="mb-4">
+          <BackButton onClick={reset} />
+        </div>
         <h2 className="text-lg font-semibold text-gray-200">Review failed</h2>
         <div className="mt-4 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded px-3 py-2 whitespace-pre-wrap">
           {run.error}
         </div>
-        <button
-          className="mt-4 text-xs px-2 py-1 rounded border border-gray-700 text-gray-300 hover:bg-gray-800"
-          onClick={reset}
-        >
-          Start over
-        </button>
       </div>
     );
   }
@@ -214,7 +225,7 @@ export default function ReviewView({
   if (run.phase !== "done") {
     return (
       <div className="flex-1 overflow-y-auto">
-        <Progress run={run} />
+        <Progress run={run} onBack={reset} />
       </div>
     );
   }
@@ -222,7 +233,7 @@ export default function ReviewView({
   return (
     <ReviewResult
       run={run}
-      onNewReview={reset}
+      onBack={reset}
       onRerun={rerun}
       onNavigate={onNavigate}
       onRefresh={refresh}

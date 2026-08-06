@@ -121,6 +121,53 @@ export default function ReviewSetup({
         </div>
       )}
 
+      {/* Past reviews — cached on disk, so they open without a model call.
+          Above the form on purpose: this is the landing page the review's back
+          button returns to, and picking up an earlier review is the likelier
+          intent there. Capped in height so the form stays reachable. */}
+      {past.length > 0 && (
+        <section className="mt-8">
+          <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+            Past reviews
+          </h3>
+          <ul className="border border-gray-800 rounded divide-y divide-gray-800 overflow-hidden overflow-y-auto max-h-64">
+            {past.map((run) => (
+              <li key={run.id}>
+                <button
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800/60 flex items-center gap-2"
+                  onClick={() => onOpenRun(run.id)}
+                >
+                  <span className="text-gray-500 font-mono">#{run.number}</span>
+                  <span className="text-gray-200 truncate flex-1">
+                    {run.title ?? run.repo}
+                  </span>
+                  {run.phase === "failed" ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
+                      failed
+                    </span>
+                  ) : run.phase === "done" ? (
+                    <span className="text-xs text-gray-500">
+                      {run.findingCount} finding
+                      {run.findingCount === 1 ? "" : "s"}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300">
+                      {run.phase}
+                    </span>
+                  )}
+                  <span className="text-gray-600 text-xs w-16 text-right">
+                    {timeAgo(run.startedAt)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-gray-600">
+            Opening one costs nothing — it's read from syl's local cache.
+          </p>
+        </section>
+      )}
+
       {/* Step 1 — remote */}
       <section className="mt-8">
         <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">
@@ -235,50 +282,6 @@ export default function ReviewSetup({
           </div>
         )}
       </section>
-
-      {/* Past reviews — cached on disk, so they open without a model call */}
-      {past.length > 0 && (
-        <section className="mt-10">
-          <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">
-            Past reviews
-          </h3>
-          <ul className="border border-gray-800 rounded divide-y divide-gray-800 overflow-hidden">
-            {past.map((run) => (
-              <li key={run.id}>
-                <button
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800/60 flex items-center gap-2"
-                  onClick={() => onOpenRun(run.id)}
-                >
-                  <span className="text-gray-500 font-mono">#{run.number}</span>
-                  <span className="text-gray-200 truncate flex-1">
-                    {run.title ?? run.repo}
-                  </span>
-                  {run.phase === "failed" ? (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
-                      failed
-                    </span>
-                  ) : run.phase === "done" ? (
-                    <span className="text-xs text-gray-500">
-                      {run.findingCount} finding
-                      {run.findingCount === 1 ? "" : "s"}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300">
-                      {run.phase}
-                    </span>
-                  )}
-                  <span className="text-gray-600 text-xs w-16 text-right">
-                    {timeAgo(run.startedAt)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-gray-600">
-            Opening one costs nothing — it's read from syl's local cache.
-          </p>
-        </section>
-      )}
     </div>
   );
 }
