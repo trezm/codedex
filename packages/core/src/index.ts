@@ -24,6 +24,10 @@ export { initTreeSitter, createParser, Parser } from "./tree-sitter/init.js";
 import "./tree-sitter/languages/typescript.js";
 import "./tree-sitter/languages/javascript.js";
 import "./tree-sitter/languages/python.js";
+import "./tree-sitter/languages/rust.js";
+import "./tree-sitter/languages/go.js";
+import "./tree-sitter/languages/swift.js";
+import "./tree-sitter/languages/kotlin.js";
 
 // Models
 export type { ModelProvider, ModelInfo } from "./models.js";
@@ -76,6 +80,8 @@ export type {
   PullRequestMeta,
   ReviewPhase,
   ReviewRun,
+  ReviewRunSummary,
+  ReviewReuse,
   ReviewCommentSide,
   ReviewEvent,
   DraftComment,
@@ -85,6 +91,7 @@ export {
   SEVERITY_ORDER,
   severityRank,
   sortFindings,
+  summarizeRun,
   REVIEW_EVENTS,
   findingToCommentBody,
   commentTargetKey,

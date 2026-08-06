@@ -117,6 +117,14 @@ export type ReviewPhase =
   | "done"
   | "failed";
 
+/** Where a finished review's findings came from. */
+export interface ReviewReuse {
+  /** The earlier run whose scout + reviewer output this run adopted. */
+  runId: string;
+  /** When that run was started, so the UI can say how old the result is. */
+  startedAt: string;
+}
+
 export interface ReviewRun {
   id: string;
   repo: string;
@@ -138,10 +146,51 @@ export interface ReviewRun {
   diff: string | null;
   /** Set when the diff was too large to send to the models in full. */
   diffTruncated: boolean;
+  /**
+   * Hash of everything the models were given — diff, PR metadata, model ids and
+   * the prompts themselves. Two runs sharing it must produce the same review,
+   * which is what makes the local cache safe. Null until the diff is fetched.
+   */
+  inputHash: string | null;
+  /** Set when the models were skipped in favour of a cached review. */
+  reusedFrom: ReviewReuse | null;
   /** Comments staged locally, not yet sent to GitHub. */
   comments: DraftComment[];
   /** Reviews already posted from this run, newest last. */
   submissions: SubmittedReview[];
+}
+
+/** A row in the run history — everything the picker shows, without the diff. */
+export interface ReviewRunSummary {
+  id: string;
+  repo: string;
+  number: number;
+  title: string | null;
+  phase: ReviewPhase;
+  startedAt: string;
+  finishedAt: string | null;
+  scoutModel: string;
+  reviewerModel: string;
+  findingCount: number;
+  reused: boolean;
+  error: string | null;
+}
+
+export function summarizeRun(run: ReviewRun): ReviewRunSummary {
+  return {
+    id: run.id,
+    repo: run.repo,
+    number: run.number,
+    title: run.meta?.title ?? null,
+    phase: run.phase,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    scoutModel: run.scoutModel,
+    reviewerModel: run.reviewerModel,
+    findingCount: run.review?.findings.length ?? 0,
+    reused: run.reusedFrom !== null,
+    error: run.error,
+  };
 }
 
 export const SEVERITY_ORDER: FindingSeverity[] = [

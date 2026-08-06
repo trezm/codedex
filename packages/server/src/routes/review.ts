@@ -51,6 +51,7 @@ export function reviewRoutes(projectRoot: string) {
       number?: number;
       scoutModel?: string;
       reviewerModel?: string;
+      refresh?: boolean;
     }>();
 
     const number = Number(body.number);
@@ -80,13 +81,21 @@ export function reviewRoutes(projectRoot: string) {
       number,
       scoutModel,
       reviewerModel,
+      refresh: body.refresh === true,
     });
 
     return c.json({ id: run.id });
   });
 
-  // GET /api/review/runs — every run this session (without diffs)
-  app.get("/runs", (c) => c.json({ runs: runner.list() }));
+  // GET /api/review/runs — past runs, newest first, from the local cache
+  app.get("/runs", (c) => {
+    const limit = Number(c.req.query("limit"));
+    return c.json({
+      runs: runner.list(
+        Number.isInteger(limit) && limit > 0 ? Math.min(limit, 100) : undefined
+      ),
+    });
+  });
 
   // GET /api/review/:id — full run, including the diff once fetched
   app.get("/:id", (c) => {

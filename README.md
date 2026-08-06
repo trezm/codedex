@@ -67,14 +67,39 @@ Two things worth knowing:
   the diff is marked *Not on a diff line* and can't be staged.
 - Submitting posts publicly as your authenticated `gh` user and can't be undone
   from Syl. The button always names the exact payload — comment count, repo and
-  PR — before you press it. Drafts live in memory with the run, so restarting
-  the server discards anything unsubmitted.
+  PR — before you press it. Drafts are saved with the run, so a server restart
+  no longer discards anything unsubmitted.
 
 Model defaults are `claude-haiku-4-5` for the scout and `claude-opus-5` for the
 reviewer, falling back to whatever is actually runnable. Both stages go through
 the `claude`/`codex` CLI when available, so a review costs subscription usage
-rather than API tokens. Runs are held in memory, so restarting the server clears
-them.
+rather than API tokens.
+
+### Cached locally
+
+Reviews are expensive, and re-reviewing an unchanged pull request produces the
+same findings twice. So every run is written to a small SQLite database at
+`.syl/cache/reviews.db` (override with `SYL_REVIEW_DB`), and reviewing a PR
+whose inputs match a stored run skips the models entirely and reuses it.
+
+"Inputs" is the whole prompt, hashed: the diff, the PR title, description and
+branches, both model ids, and the prompt text itself. Push a commit, retitle the
+PR, pick a different reviewer model or edit a prompt in `review/prompts.ts`, and
+the next review is a miss and runs for real. A reused review is labelled
+**cached** in the header with the date of the run it came from, next to a
+**re-run** link; **Ignore cached result** on the setup screen does the same
+thing up front.
+
+Two other things fall out of it. Past runs are listed on the setup screen and
+reopen without touching GitHub, and everything attached to a run — the diff, the
+findings, staged comments, submitted reviews — survives a restart. The 200 most
+recent runs are kept; older ones are dropped.
+
+The cache is disposable: delete the file, or let it be discarded automatically
+when the schema changes. The directory ignores itself, so it stays out of git
+even though the rest of `.syl/` is meant to be committed. It needs the built-in
+`node:sqlite`, which means Node 22.5 or newer — on older Node, syl logs a
+warning at startup and keeps runs in memory as before.
 
 ## Links in Annotations
 
@@ -207,6 +232,52 @@ Each file contains annotations keyed by semantic path:
 
 ## Supported Languages
 
-- TypeScript / TSX
-- JavaScript / JSX
-- Python
+Two separate things, and a file can have one without the other.
+
+**Annotations** need a tree-sitter config, because that's what turns a file into
+semantic paths. Currently TypeScript/TSX, JavaScript/JSX, Python, Rust, Go,
+Swift and Kotlin. Without one, a file opens read-only and the **Generate File**
+button is hidden — as it also is for a supported file that happens to contain no
+declarations at all, such as a barrel `index.ts` of pure re-exports.
+
+**Syntax highlighting** is independent and covers ~45 extensions, loaded on
+demand: full Lezer parsers for the languages that publish one, and
+`@codemirror/legacy-modes` for the rest (Kotlin, Swift, Ruby, Lua, shell, TOML,
+Scala, C#, …). Legacy modes are regex-based, so highlighting is coarser than a
+real parser but far better than plain text. Each grammar is a separate chunk;
+adding all of them costs ~10 kB on the main bundle rather than the ~490 kB it
+would cost to import them eagerly.
+
+Adding a language for annotations means one config under
+`packages/core/src/tree-sitter/languages/`. The grammars themselves already
+ship with `tree-sitter-wasms` (31 of them) and are served on demand, so nothing
+needs downloading — but each config has to be written against that grammar's
+real node types. They vary more than you would expect: Kotlin exposes no `name`
+field on any declaration, Swift models `struct`/`class`/`enum`/`extension` as
+one node type, and Rust `impl` blocks have `type`/`trait` instead of a name.
+
+### Node version
+
+Node 20 or 22. **Node 23+ crashes** — V8 hits a fatal `Zone` OOM while compiling
+the fourth-or-so tree-sitter grammar, at well under 100 MB RSS, taking the API
+server down with it. Node 20 and 22 load the same grammars fine. There's an
+`.nvmrc`, so `nvm use` picks the right one.
+
+### Path shapes per language
+
+Paths follow each language's own conventions, and a few carry a keyword to stay
+unambiguous:
+
+| Language | Example paths |
+| --- | --- |
+| TypeScript / JavaScript | `AnnotationStore.load`, `OPENAI_MODELS` |
+| Python | `Greeter.greet` |
+| Go | `Parser.Advance` (methods are qualified by receiver) |
+| Rust | `Parser`, `impl Parser.new`, `impl Render for Parser.render` |
+| Swift | `Parser.advance`, `extension Parser.render` |
+| Kotlin | `Parser.advance`, `Parser.Companion.make`, `Token.IDENT` |
+
+Rust `impl` blocks and Swift extensions keep their keyword because both reuse
+the name of the type they belong to. Without it, `struct Parser` and `impl
+Parser` collapse to `Parser[1]`/`Parser[2]`, where adding an impl block
+renumbers the other one and orphans its annotations.

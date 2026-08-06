@@ -15,11 +15,32 @@ export async function initTreeSitter(locateDir?: string): Promise<void> {
   initialized = true;
 }
 
+/**
+ * Compiled grammars, keyed by wasm path.
+ *
+ * Loading a grammar compiles a whole wasm module, and the project index calls
+ * this once per file — so without a cache, indexing a repo of N Kotlin files
+ * meant N compiles of a 3.9 MB module. A `Language` is immutable and shareable,
+ * so only the cheap `Parser` wrapper needs creating per call. Caching the
+ * promise (not the resolved value) also collapses concurrent loads of the same
+ * grammar into a single compile.
+ */
+const languageCache = new Map<string, Promise<any>>();
+
 export async function createParser(wasmPath: string, treeSitterWasmDir?: string): Promise<Parser> {
   await initTreeSitter(treeSitterWasmDir);
+
+  let language = languageCache.get(wasmPath);
+  if (!language) {
+    language = Parser.Language.load(wasmPath);
+    languageCache.set(wasmPath, language);
+    // Don't cache a failure — a transient read error shouldn't poison the
+    // grammar for the life of the process.
+    language.catch(() => languageCache.delete(wasmPath));
+  }
+
   const parser = new Parser();
-  const lang = await Parser.Language.load(wasmPath);
-  parser.setLanguage(lang);
+  parser.setLanguage(await language);
   return parser;
 }
 

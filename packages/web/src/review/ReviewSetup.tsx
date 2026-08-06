@@ -1,9 +1,20 @@
 import { useEffect, useState } from "react";
-import type { GitRemote, PullRequestSummary } from "@syl/core";
-import { fetchRemotes, fetchPullRequests } from "../api";
+import type {
+  GitRemote,
+  PullRequestSummary,
+  ReviewRunSummary,
+} from "@syl/core";
+import { fetchRemotes, fetchPullRequests, fetchReviewRuns } from "../api";
 
 interface ReviewSetupProps {
-  onStart: (params: { remote: string; repo: string; number: number }) => void;
+  onStart: (params: {
+    remote: string;
+    repo: string;
+    number: number;
+    refresh: boolean;
+  }) => void;
+  /** Reopens a past run straight from the cache, without touching GitHub. */
+  onOpenRun: (id: string) => void;
   busy: boolean;
 }
 
@@ -13,14 +24,38 @@ const STATE_STYLE: Record<string, string> = {
   CLOSED: "bg-gray-500/15 text-gray-400 border-gray-500/40",
 };
 
-export default function ReviewSetup({ onStart, busy }: ReviewSetupProps) {
+/** Compact relative age — past reviews are usually hours or days old. */
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 90) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+export default function ReviewSetup({
+  onStart,
+  onOpenRun,
+  busy,
+}: ReviewSetupProps) {
   const [remotes, setRemotes] = useState<GitRemote[]>([]);
   const [remote, setRemote] = useState<GitRemote | null>(null);
   const [prs, setPrs] = useState<PullRequestSummary[]>([]);
   const [prsLoading, setPrsLoading] = useState(false);
   const [prError, setPrError] = useState<string | null>(null);
   const [number, setNumber] = useState("");
+  const [refresh, setRefresh] = useState(false);
+  const [past, setPast] = useState<ReviewRunSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  // Past runs come from the server's cache, so they outlive a restart.
+  useEffect(() => {
+    fetchReviewRuns()
+      .then(setPast)
+      .catch(() => setPast([]));
+  }, []);
 
   useEffect(() => {
     fetchRemotes()
@@ -64,7 +99,12 @@ export default function ReviewSetup({ onStart, busy }: ReviewSetupProps) {
       return;
     }
     setError(null);
-    onStart({ remote: remote.name, repo: remote.repo, number: parsed });
+    onStart({
+      remote: remote.name,
+      repo: remote.repo,
+      number: parsed,
+      refresh,
+    });
   };
 
   return (
@@ -136,6 +176,18 @@ export default function ReviewSetup({ onStart, busy }: ReviewSetupProps) {
           >
             {busy ? "Starting…" : "Start review"}
           </button>
+          <label
+            className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none"
+            title="Reviewing the same commits with the same models normally reuses the stored result instead of calling the models again."
+          >
+            <input
+              type="checkbox"
+              className="accent-blue-500"
+              checked={refresh}
+              onChange={(e) => setRefresh(e.target.checked)}
+            />
+            Ignore cached result
+          </label>
         </div>
 
         {remote?.repo && (
@@ -183,6 +235,50 @@ export default function ReviewSetup({ onStart, busy }: ReviewSetupProps) {
           </div>
         )}
       </section>
+
+      {/* Past reviews — cached on disk, so they open without a model call */}
+      {past.length > 0 && (
+        <section className="mt-10">
+          <h3 className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+            Past reviews
+          </h3>
+          <ul className="border border-gray-800 rounded divide-y divide-gray-800 overflow-hidden">
+            {past.map((run) => (
+              <li key={run.id}>
+                <button
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-800/60 flex items-center gap-2"
+                  onClick={() => onOpenRun(run.id)}
+                >
+                  <span className="text-gray-500 font-mono">#{run.number}</span>
+                  <span className="text-gray-200 truncate flex-1">
+                    {run.title ?? run.repo}
+                  </span>
+                  {run.phase === "failed" ? (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/10 text-red-300">
+                      failed
+                    </span>
+                  ) : run.phase === "done" ? (
+                    <span className="text-xs text-gray-500">
+                      {run.findingCount} finding
+                      {run.findingCount === 1 ? "" : "s"}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-300">
+                      {run.phase}
+                    </span>
+                  )}
+                  <span className="text-gray-600 text-xs w-16 text-right">
+                    {timeAgo(run.startedAt)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-gray-600">
+            Opening one costs nothing — it's read from syl's local cache.
+          </p>
+        </section>
+      )}
     </div>
   );
 }
