@@ -3,6 +3,7 @@ import { collectRefs } from "@syl/core";
 import type { Annotation, SemanticNode, LinkTarget } from "@syl/core";
 import type { EditorView } from "@codemirror/view";
 import FileBrowser from "./components/FileBrowser";
+import FileFinder from "./components/FileFinder";
 import CodeViewer from "./components/CodeViewer";
 import AnnotationOverlay, {
   AnnotationBracket,
@@ -17,13 +18,24 @@ import ReviewView from "./review/ReviewView";
 import type { ResolvedLinks } from "./components/AnnotationBody";
 import {
   fetchFileContent,
+  fetchFileTree,
   resolveAnnotations,
   generateAnnotation,
   generateFileAnnotations,
   checkGenerateStatus,
   resolveLinks,
   ResolveResponse,
+  type FileNode,
 } from "./api";
+
+/** Depth-first list of every file path in the tree, for the Cmd+K finder. */
+function flattenFiles(nodes: FileNode[], into: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.type === "directory") flattenFiles(node.children ?? [], into);
+    else into.push(node.path);
+  }
+  return into;
+}
 
 function buildBrackets(
   nodes: SemanticNode[],
@@ -68,11 +80,35 @@ export default function App() {
   const [reveal, setReveal] = useState<{ line: number; nonce: number } | null>(
     null
   );
+  const [tree, setTree] = useState<FileNode[]>([]);
+  const [treeLoading, setTreeLoading] = useState(true);
+  const [finderOpen, setFinderOpen] = useState(false);
   const [models, setModels] = useState<AvailableModel[]>([]);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const { model, selectModel } = useSelectedModel(models, defaultModel);
 
   const { pathResult } = useTreeSitter(selectedFile, fileContent);
+
+  useEffect(() => {
+    fetchFileTree()
+      .then(setTree)
+      .catch(() => {})
+      .finally(() => setTreeLoading(false));
+  }, []);
+
+  const allFiles = useMemo(() => flattenFiles(tree), [tree]);
+
+  // Cmd/Ctrl+K opens the finder from anywhere, including the review tab.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setFinderOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   // Which models the server can actually run (i.e. whose API key is set)
   useEffect(() => {
@@ -284,6 +320,8 @@ export default function App() {
           <FileBrowser
             onSelect={handleFileSelect}
             selectedFile={selectedFile}
+            tree={tree}
+            loading={treeLoading}
           />
         </div>
         <div className="flex-1 overflow-hidden flex">
@@ -321,6 +359,18 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <FileFinder
+        open={finderOpen}
+        files={allFiles}
+        onClose={() => setFinderOpen(false)}
+        onSelect={(path) => {
+          // Opening a file only means something on the annotate tab, so jump
+          // there — the same move the review tab's annotation links make.
+          setMode("annotate");
+          handleFileSelect(path);
+        }}
+      />
     </div>
   );
 }
