@@ -1,3 +1,50 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Syntax highlighting for the review diff, which renders code as plain DOM
+ * rather than in CodeMirror. The palette is One Dark's, matching the theme the
+ * code viewer uses, so the same file looks the same in both places.
+ */
+.tok-keyword {
+  color: #c678dd;
+}
+.tok-name {
+  color: #e06c75;
+}
+.tok-function {
+  color: #61afef;
+}
+.tok-constant,
+.tok-atom {
+  color: #d19a66;
+}
+.tok-definition {
+  color: #abb2bf;
+}
+.tok-type {
+  color: #e5c07b;
+}
+.tok-operator {
+  color: #56b6c2;
+}
+.tok-comment {
+  color: #7d8799;
+}
+.tok-string {
+  color: #98c379;
+}
+.tok-invalid {
+  color: #ffffff;
+}
+.tok-strong {
+  font-weight: 600;
+}
+.tok-emphasis {
+  font-style: italic;
+}
+.tok-heading {
+  color: #e06c75;
+  font-weight: 600;
+}

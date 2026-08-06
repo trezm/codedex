@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import { StreamLanguage } from "@codemirror/language";
+import { Language, LanguageSupport, StreamLanguage } from "@codemirror/language";
 
 /**
  * Syntax highlighting, resolved per file extension.
@@ -12,8 +12,11 @@ import { StreamLanguage } from "@codemirror/language";
  * Languages with a real Lezer parser get one; the rest fall back to a
  * `StreamLanguage` from @codemirror/legacy-modes, which is regex-based and
  * coarser (no nesting) but still far better than plain text.
+ *
+ * Loaders hand back the language itself rather than a bare extension, because
+ * the review diff highlights outside of an editor and needs the parser.
  */
-type Loader = () => Promise<Extension>;
+type Loader = () => Promise<LanguageSupport | Language>;
 
 /** Wraps a legacy CodeMirror 5 mode as a CodeMirror 6 language. */
 function legacy(load: () => Promise<any>, exportName: string): Loader {
@@ -120,16 +123,38 @@ const BY_FILENAME: Record<string, string> = {
 };
 
 export function hasHighlighting(filePath: string): boolean {
-  return resolveLoader(filePath) !== null;
+  return resolveKey(filePath) !== null;
 }
 
-function resolveLoader(filePath: string): Loader | null {
+/** The `LOADERS` key for a file, or null when the language isn't supported. */
+function resolveKey(filePath: string): string | null {
   const name = filePath.split("/").pop()?.toLowerCase() ?? "";
   const byName = BY_FILENAME[name];
-  if (byName) return LOADERS[byName] ?? null;
+  if (byName) return byName in LOADERS ? byName : null;
   const dot = name.lastIndexOf(".");
   if (dot === -1) return null;
-  return LOADERS[name.slice(dot + 1)] ?? null;
+  const ext = name.slice(dot + 1);
+  return ext in LOADERS ? ext : null;
+}
+
+/**
+ * Languages are stateless and reusable, so a diff with thirty TypeScript files
+ * builds the grammar once. Failures cache as null — one warning, not thirty.
+ */
+const loaded = new Map<string, Promise<LanguageSupport | Language | null>>();
+
+function load(filePath: string): Promise<LanguageSupport | Language | null> {
+  const key = resolveKey(filePath);
+  if (!key) return Promise.resolve(null);
+  let pending = loaded.get(key);
+  if (!pending) {
+    pending = LOADERS[key]().catch((e) => {
+      console.warn(`Failed to load highlighting for .${key}`, e);
+      return null;
+    });
+    loaded.set(key, pending);
+  }
+  return pending;
 }
 
 /**
@@ -140,12 +165,16 @@ function resolveLoader(filePath: string): Loader | null {
 export async function loadLanguageExtension(
   filePath: string
 ): Promise<Extension | null> {
-  const loader = resolveLoader(filePath);
-  if (!loader) return null;
-  try {
-    return await loader();
-  } catch (e) {
-    console.warn(`Failed to load highlighting for ${filePath}`, e);
-    return null;
-  }
+  return load(filePath);
+}
+
+/**
+ * The parser-carrying language for a file, for highlighting text that isn't in
+ * an editor. `LanguageSupport` bundles a language with its editor extras
+ * (completion, indentation); only the language itself matters here.
+ */
+export async function loadLanguage(filePath: string): Promise<Language | null> {
+  const result = await load(filePath);
+  if (!result) return null;
+  return result instanceof LanguageSupport ? result.language : result;
 }

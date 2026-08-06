@@ -14,6 +14,7 @@ import CommentComposer from "./CommentComposer";
 import DraftCommentCard from "./DraftCommentCard";
 import type { DiffAnnotation, DiffAnnotationData } from "./useDiffAnnotations";
 import type { ResolvedLinks } from "../components/AnnotationBody";
+import { useDiffHighlight, type DiffHighlight, type Token } from "./highlight";
 import { SEVERITY_DOT } from "./severity";
 
 export type DiffViewMode = "unified" | "split";
@@ -72,12 +73,28 @@ function Gutter({
   );
 }
 
+/** A line's text, syntax-highlighted once its grammar has loaded. */
+function CodeText({ line, tokens }: { line: DiffLine; tokens?: Token[] }) {
+  if (!tokens) return <>{line.text}</>;
+  return (
+    <>
+      {tokens.map((token, i) => (
+        <span key={i} className={token.cls || undefined}>
+          {token.text}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** One code cell; `divider` draws the rule between the panes in split mode. */
 function CodeCell({
   line,
+  tokens,
   divider,
 }: {
   line: DiffLine | null;
+  tokens?: Token[];
   divider?: boolean;
 }) {
   if (!line) {
@@ -94,9 +111,18 @@ function CodeCell({
       )} ${divider ? "border-r border-gray-800/80" : ""}`}
     >
       <span className={markerClass(line.type)}>{marker(line.type)}</span>
-      {line.text}
+      <CodeText line={line} tokens={tokens} />
     </td>
   );
+}
+
+/** Tokens for a line, or undefined while the file's grammar is still loading. */
+function tokensFor(
+  highlight: DiffHighlight | null,
+  line: DiffLine | null
+): Token[] | undefined {
+  if (!highlight || !line) return undefined;
+  return highlight.get(line);
 }
 
 /** findingKey identifies a finding globally so the sidebar can scroll to it. */
@@ -191,6 +217,7 @@ function FileDiff({
   const [composing, setComposing] = useState<CommentTarget | null>(null);
   const [saving, setSaving] = useState(false);
   const [composeError, setComposeError] = useState<string | null>(null);
+  const highlight = useDiffHighlight(file);
 
   const columns = viewMode === "split" ? 4 : 3;
 
@@ -502,7 +529,11 @@ function FileDiff({
                                       : undefined
                                   }
                                 />
-                                <CodeCell line={row.left} divider />
+                                <CodeCell
+                                  line={row.left}
+                                  tokens={tokensFor(highlight, row.left)}
+                                  divider
+                                />
                                 <Gutter
                                   value={row.right?.newLine ?? null}
                                   type={row.right?.type}
@@ -512,7 +543,10 @@ function FileDiff({
                                       : undefined
                                   }
                                 />
-                                <CodeCell line={row.right} />
+                                <CodeCell
+                                  line={row.right}
+                                  tokens={tokensFor(highlight, row.right)}
+                                />
                               </tr>
                               {attachedRows(row.right?.newLine ?? null, targets)}
                             </Fragment>
@@ -533,7 +567,10 @@ function FileDiff({
                                       : undefined
                                   }
                                 />
-                                <CodeCell line={line} />
+                                <CodeCell
+                                  line={line}
+                                  tokens={tokensFor(highlight, line)}
+                                />
                               </tr>
                               {attachedRows(line.newLine, target ? [target] : [])}
                             </Fragment>
