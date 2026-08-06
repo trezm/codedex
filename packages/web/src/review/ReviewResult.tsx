@@ -27,6 +27,7 @@ import {
 import { SEVERITY_STYLE, SEVERITY_DOT, RISK_STYLE } from "./severity";
 
 const VIEW_MODE_KEY = "syl-diff-view-mode";
+const NOTES_COLLAPSED_KEY = "syl-diff-notes-collapsed";
 
 export default function ReviewResult({
   run,
@@ -51,10 +52,28 @@ export default function ReviewResult({
     }
   });
 
+  const [notesCollapsed, setNotesCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(NOTES_COLLAPSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
   const chooseViewMode = (mode: DiffViewMode) => {
     setViewMode(mode);
     try {
       localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+      // ignore
+    }
+  };
+
+  const toggleNotes = () => {
+    const next = !notesCollapsed;
+    setNotesCollapsed(next);
+    try {
+      localStorage.setItem(NOTES_COLLAPSED_KEY, next ? "1" : "0");
     } catch {
       // ignore
     }
@@ -245,10 +264,19 @@ export default function ReviewResult({
             <span className="text-red-400">−{totals.deletions}</span>
           </span>
           {annotationCount > 0 && (
-            <span className="text-violet-300/80">
-              {annotationCount} syl annotation
+            <button
+              className="text-violet-300/80 hover:text-violet-200"
+              title={
+                notesCollapsed
+                  ? "Expand every syl annotation in this diff"
+                  : "Collapse every syl annotation in this diff"
+              }
+              aria-expanded={!notesCollapsed}
+              onClick={toggleNotes}
+            >
+              {notesCollapsed ? "▸" : "▾"} {annotationCount} syl annotation
               {annotationCount === 1 ? "" : "s"} on these files
-            </span>
+            </button>
           )}
           <span className="text-gray-600">
             scout {run.scoutModel}
@@ -389,6 +417,7 @@ export default function ReviewResult({
               activeFindingId={activeFindingId}
               viewMode={viewMode}
               annotationData={annotationData}
+              notesCollapsed={notesCollapsed}
               onNavigate={onNavigate}
               {...commentHandlers}
             />
