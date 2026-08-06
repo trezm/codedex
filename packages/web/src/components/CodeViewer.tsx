@@ -7,10 +7,15 @@ import {
   Decoration,
   type DecorationSet,
 } from "@codemirror/view";
-import { EditorState, StateField, StateEffect, RangeSet } from "@codemirror/state";
-import { javascript } from "@codemirror/lang-javascript";
-import { python } from "@codemirror/lang-python";
+import {
+  EditorState,
+  StateField,
+  StateEffect,
+  RangeSet,
+  Compartment,
+} from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
+import { loadLanguageExtension } from "../languages";
 import type { SemanticPathResult } from "@syl/core";
 
 interface CodeViewerProps {
@@ -92,16 +97,6 @@ const highlightLineField = StateField.define<DecorationSet>({
   provide: (field) => EditorView.decorations.from(field),
 });
 
-function getLanguageExtension(filePath: string) {
-  if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(filePath))
-    return javascript({
-      typescript: /\.tsx?$/.test(filePath),
-      jsx: /\.[jt]sx$/.test(filePath),
-    });
-  if (/\.py$/.test(filePath)) return python();
-  return [];
-}
-
 export default function CodeViewer({
   content,
   filePath,
@@ -133,13 +128,17 @@ export default function CodeViewer({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // Highlighting is code-split, so the editor mounts unhighlighted and the
+    // language is swapped in through this compartment once its chunk lands.
+    const language = new Compartment();
+
     const view = new EditorView({
       state: EditorState.create({
         doc: content,
         extensions: [
           EditorView.editable.of(false),
           EditorState.readOnly.of(true),
-          getLanguageExtension(filePath),
+          language.of([]),
           oneDark,
           lineNumbers(),
           annotationLinesField,
@@ -185,7 +184,14 @@ export default function CodeViewer({
     viewRef.current = view;
     onViewReady?.(view);
 
+    let cancelled = false;
+    loadLanguageExtension(filePath).then((extension) => {
+      if (cancelled || !extension) return;
+      view.dispatch({ effects: language.reconfigure(extension) });
+    });
+
     return () => {
+      cancelled = true;
       view.destroy();
       viewRef.current = null;
       onViewReady?.(null);
