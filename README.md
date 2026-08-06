@@ -170,9 +170,23 @@ SYL_OPENAI_MODELS=gpt-5,o4-mini npm run dev
 Generated annotations are stored with an author of `claude` or `chatgpt`, so you
 can tell them apart from your own.
 
+## Finding Files
+
+`⌘K` (`Ctrl+K` on Linux/Windows) opens a fuzzy file finder from anywhere,
+including the review tab — picking a file there switches back to annotate.
+
+Matching is subsequence-based, so `cv` finds `components/CodeViewer.tsx` and
+`srvidx` finds `server/src/index.ts`. Ranking favours characters that land on a
+word boundary or camelCase hump, runs of consecutive characters, and matches in
+the filename rather than the directories leading to it — so `pkg` puts the root
+`package.json` above `packages/web/package.json`.
+
+Arrow keys (or `Ctrl+N`/`Ctrl+P`) move, `↵` opens, `esc` closes, and hovering a
+row makes it the Enter target so the pointer and keyboard never disagree.
+
 ## How It Works
 
-1. **Select a file** in the sidebar
+1. **Select a file** in the sidebar, or hit `⌘K`
 2. **Click a function/class name** in the code viewer — the annotation panel shows the semantic path
 3. **Add an annotation** — it's saved to `.syl/<file>.json` on disk
 4. **Rename the function** in source — the annotation shows as orphaned on next load

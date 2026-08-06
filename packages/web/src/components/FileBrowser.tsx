@@ -1,9 +1,12 @@
-import { useState, useEffect } from "react";
-import { fetchFileTree, FileNode } from "../api";
+import { useState } from "react";
+import { FileNode } from "../api";
 
 interface FileBrowserProps {
   onSelect: (path: string) => void;
   selectedFile: string | null;
+  /** Owned by App so the finder and the tree can't drift apart. */
+  tree: FileNode[];
+  loading: boolean;
 }
 
 function FileTreeNode({
@@ -65,20 +68,19 @@ function FileTreeNode({
 export default function FileBrowser({
   onSelect,
   selectedFile,
+  tree,
+  loading,
 }: FileBrowserProps) {
-  const [tree, setTree] = useState<FileNode[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetchFileTree()
-      .then(setTree)
-      .finally(() => setLoading(false));
-  }, []);
-
   return (
     <div className="h-full overflow-y-auto bg-gray-950 border-r border-gray-800">
-      <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-800">
-        Files
+      <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-500 border-b border-gray-800 flex items-center">
+        <span>Files</span>
+        <kbd
+          className="ml-auto font-sans font-normal normal-case text-[10px] text-gray-600 border border-gray-800 rounded px-1 py-0.5"
+          title="Search files"
+        >
+          ⌘K
+        </kbd>
       </div>
       {loading ? (
         <div className="p-3 text-gray-500 text-sm">Loading...</div>

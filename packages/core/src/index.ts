@@ -42,6 +42,10 @@ export {
   findModel,
 } from "./models.js";
 
+// Fuzzy matching
+export type { FuzzyMatch, FuzzyResult } from "./fuzzy.js";
+export { fuzzyMatch, fuzzyFilter } from "./fuzzy.js";
+
 // Links
 export type { LinkTarget, ParsedRef, BodySegment } from "./links.js";
 export {
